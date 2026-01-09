@@ -1,0 +1,118 @@
+#include "sd_card_spi.h"
+#include "spi.h"
+
+extern SPI_HandleTypeDef hspi1;
+volatile uint8_t g_dma_rx_done = 0; // DMA 接收完成标志
+
+// 1. SPI 读写单字节 (基础)
+static uint8_t SPI_ReadWriteByte(uint8_t data) {
+    uint8_t res;
+    HAL_SPI_TransmitReceive(&hspi1, &data, &res, 1, HAL_MAX_DELAY);
+    return res;
+}
+
+// 2. SPI 切换到高速模式 (初始化完成后调用)
+void SD_SPI_SpeedHigh(void) {
+    __HAL_SPI_DISABLE(&hspi1);
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4; // 100MHz/4 = 25MHz
+    HAL_SPI_Init(&hspi1);
+    __HAL_SPI_ENABLE(&hspi1);
+}
+
+// 3. 等待 SD 卡准备就绪
+uint8_t SD_WaitReady(void) {
+    uint32_t t = 0;
+    do {
+        if (SPI_ReadWriteByte(0xFF) == 0xFF) return 0;
+        t++;
+    } while (t < 0xFFFFFF); // 超时等待
+    return 1;
+}
+
+// 4. 发送命令
+uint8_t SD_SendCmd(uint8_t cmd, uint32_t arg, uint8_t crc) {
+    uint8_t res;
+    SD_CS_HIGH();
+    SPI_ReadWriteByte(0xFF); // 产生额外时钟
+    SD_CS_LOW();
+
+    // 等待卡准备好
+    if (SD_WaitReady()) return 0xFF;
+
+    // 发送 6 字节命令包
+    SPI_ReadWriteByte(cmd | 0x40);
+    SPI_ReadWriteByte(arg >> 24);
+    SPI_ReadWriteByte(arg >> 16);
+    SPI_ReadWriteByte(arg >> 8);
+    SPI_ReadWriteByte(arg);
+    SPI_ReadWriteByte(crc);
+
+    // 等待响应
+    uint8_t retry = 0;
+    do {
+        res = SPI_ReadWriteByte(0xFF);
+    } while ((res & 0x80) && retry++ < 0XFE);
+
+    return res;
+}
+
+// 5. 初始化 SD 卡 (核心步骤)
+uint8_t SD_Init(void) {
+    uint8_t res, i;
+    uint8_t buf[4];
+
+    SD_CS_HIGH();
+    // 发送至少 74 个脉冲让卡进入工作状态
+    for (i = 0; i < 10; i++) SPI_ReadWriteByte(0xFF);
+
+    // CMD0: 复位进入 Idle 状态
+    res = SD_SendCmd(CMD0, 0, 0x95);
+    if (res != 0x01) return 1;
+
+    // CMD8: 检查是否为 SD2.0 卡
+    res = SD_SendCmd(CMD8, 0x1AA, 0x87);
+    if (res == 0x01) { // SD2.0
+        for (i = 0; i < 4; i++) buf[i] = SPI_ReadWriteByte(0xFF);
+        // 循环发送 ACMD41 激活卡
+        uint32_t retry = 0xFFFF;
+        do {
+            SD_SendCmd(CMD55, 0, 0x01);
+            res = SD_SendCmd(CMD41, 0x40000000, 0x01);
+        } while (res != 0x00 && retry--);
+
+        // 初始化成功后提速
+        SD_SPI_SpeedHigh();
+    }
+    SD_CS_HIGH();
+    return (res == 0) ? 0 : 1;
+}
+
+// 6. DMA 读取块 (大幅提升 MP3 读取性能)
+// 覆写 SPI 的 DMA 完成回调
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
+    if (hspi->Instance == SPI1) {
+        g_dma_rx_done = 1;
+    }
+}
+
+uint8_t SD_ReadDisk(uint8_t* buf, uint32_t sector, uint8_t cnt) {
+    uint8_t res;
+    if (cnt == 1) {
+        res = SD_SendCmd(CMD17, sector, 0x01); // 读单块
+        if (res == 0) {
+            // 等待起始令牌 0xFE
+            while (SPI_ReadWriteByte(0xFF) != 0xFE);
+
+            // 使用 DMA 接收 512 字节
+            g_dma_rx_done = 0;
+            HAL_SPI_Receive_DMA(&hspi1, buf, 512);
+            while (!g_dma_rx_done); // 等待 DMA 中断触发
+
+            // 接收 2 字节 CRC
+            SPI_ReadWriteByte(0xFF);
+            SPI_ReadWriteByte(0xFF);
+        }
+    }
+    SD_CS_HIGH();
+    return res;
+}
