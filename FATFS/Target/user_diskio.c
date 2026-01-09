@@ -37,6 +37,8 @@
 #include "ff_gen_drv.h"
 
 /* Private typedef -----------------------------------------------------------*/
+#include "sd_card_spi.h"
+
 /* Private define ------------------------------------------------------------*/
 
 /* Private variables ---------------------------------------------------------*/
@@ -81,8 +83,7 @@ DSTATUS USER_initialize (
 )
 {
   /* USER CODE BEGIN INIT */
-    Stat = STA_NOINIT;
-    return Stat;
+  return (SD_Init() == 0) ? RES_OK : STA_NOINIT;
   /* USER CODE END INIT */
 }
 
@@ -96,8 +97,7 @@ DSTATUS USER_status (
 )
 {
   /* USER CODE BEGIN STATUS */
-    Stat = STA_NOINIT;
-    return Stat;
+  return RES_OK; // 简化处理
   /* USER CODE END STATUS */
 }
 
@@ -117,7 +117,10 @@ DRESULT USER_read (
 )
 {
   /* USER CODE BEGIN READ */
+  if (SD_ReadDisk(buff, sector, count) == 0) {
     return RES_OK;
+  }
+  return RES_ERROR;
   /* USER CODE END READ */
 }
 
@@ -159,8 +162,12 @@ DRESULT USER_ioctl (
 )
 {
   /* USER CODE BEGIN IOCTL */
-    DRESULT res = RES_ERROR;
-    return res;
+  // 关键：FatFs 需要知道扇区大小
+  switch (cmd) {
+    case GET_SECTOR_SIZE:  *(WORD*)buff = 512; break;
+    case CTRL_SYNC: break;
+  }
+  return RES_OK;
   /* USER CODE END IOCTL */
 }
 #endif /* _USE_IOCTL == 1 */
