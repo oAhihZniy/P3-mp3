@@ -47,3 +47,15 @@ void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
         // 这里设置标志位，通知主循环：快把新的 MP3 解码数据填入 AudioBuffer[AUDIO_BUF_SIZE/2 ... AUDIO_BUF_SIZE - 1]
     }
 }
+
+// 生成 1kHz 的正弦波填满缓冲区 测试用
+void Audio_GenerateTestTone(void) {
+    float frequency = 1000.0;
+    float sample_rate = 44100.0;
+    for (int i = 0; i < AUDIO_BUF_SIZE; i += 2) {
+        // 计算采样值
+        int16_t sample = (int16_t)(3000.0 * sin(2.0 * M_PI * frequency * (i/2.0) / sample_rate));
+        AudioBuffer[i] = sample;     // 左声道
+        AudioBuffer[i+1] = sample;   // 右声道
+    }
+}
