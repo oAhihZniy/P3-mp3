@@ -37,7 +37,9 @@ enable_language(C ASM)
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
         User/sd_card_spi.c
-        User/sd_card_spi.h)
+        User/sd_card_spi.h
+        User/audio_driver.c
+        User/audio_driver.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

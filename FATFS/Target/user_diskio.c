@@ -83,7 +83,8 @@ DSTATUS USER_initialize (
 )
 {
   /* USER CODE BEGIN INIT */
-  return (SD_Init() == 0) ? RES_OK : STA_NOINIT;
+  if (SD_Init() == 0) return RES_OK;
+  return STA_NOINIT;
   /* USER CODE END INIT */
 }
 
@@ -97,7 +98,9 @@ DSTATUS USER_status (
 )
 {
   /* USER CODE BEGIN STATUS */
-  return RES_OK; // 简化处理
+  // 这里简单处理，默认返回 OK 即可，或者通过 GPIO 读取 PB3 (SD_DET)
+  if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3) == GPIO_PIN_SET) return STA_NODISK;
+  return 0;
   /* USER CODE END STATUS */
 }
 
@@ -142,7 +145,9 @@ DRESULT USER_write (
 {
   /* USER CODE BEGIN WRITE */
   /* USER CODE HERE */
-    return RES_OK;
+  // 将 const 指针转为普通指针调用你的驱动
+  if (SD_WriteDisk((uint8_t*)buff, sector, count) == 0) return RES_OK;
+  return RES_ERROR;
   /* USER CODE END WRITE */
 }
 #endif /* _USE_WRITE == 1 */

@@ -61,6 +61,10 @@ uint8_t SD_Init(void) {
     uint8_t res, i;
     uint8_t buf[4];
 
+    // A. 低速模式 (400kHz 以下): 修改 SPI1 分频为 256
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
+    HAL_SPI_Init(&hspi1);
+
     SD_CS_HIGH();
     // 发送至少 74 个脉冲让卡进入工作状态
     for (i = 0; i < 10; i++) SPI_ReadWriteByte(0xFF);
@@ -95,24 +99,114 @@ void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
     }
 }
 
+// uint8_t SD_ReadDisk(uint8_t* buf, uint32_t sector, uint8_t cnt) {
+//     uint8_t res;
+//     if (cnt == 1) {
+//         res = SD_SendCmd(CMD17, sector, 0x01); // 读单块
+//         if (res == 0) {
+//             // 等待起始令牌 0xFE
+//             while (SPI_ReadWriteByte(0xFF) != 0xFE);
+//
+//             // 使用 DMA 接收 512 字节
+//             g_dma_rx_done = 0;
+//             HAL_SPI_Receive_DMA(&hspi1, buf, 512);
+//             while (!g_dma_rx_done); // 等待 DMA 中断触发
+//
+//             // 接收 2 字节 CRC
+//             SPI_ReadWriteByte(0xFF);
+//             SPI_ReadWriteByte(0xFF);
+//         }
+//     }
+//     SD_CS_HIGH();
+//     return res;
+// }
+
 uint8_t SD_ReadDisk(uint8_t* buf, uint32_t sector, uint8_t cnt) {
-    uint8_t res;
-    if (cnt == 1) {
-        res = SD_SendCmd(CMD17, sector, 0x01); // 读单块
-        if (res == 0) {
-            // 等待起始令牌 0xFE
-            while (SPI_ReadWriteByte(0xFF) != 0xFE);
+    uint8_t res = 0;
 
-            // 使用 DMA 接收 512 字节
-            g_dma_rx_done = 0;
-            HAL_SPI_Receive_DMA(&hspi1, buf, 512);
-            while (!g_dma_rx_done); // 等待 DMA 中断触发
+    // 如果是 SDHC 卡，使用扇区地址；如果是老卡，需要 sector << 9
+    // 假设你用的是现代 SDHC 卡
 
-            // 接收 2 字节 CRC
-            SPI_ReadWriteByte(0xFF);
-            SPI_ReadWriteByte(0xFF);
-        }
+    for (uint8_t i = 0; i < cnt; i++) {
+        res = SD_SendCmd(CMD17, sector + i, 0xFF); // 修改为标准的 CRC 0xFF
+        if (res != 0) break;
+
+        // 等待起始令牌 0xFE
+        uint32_t timeout = 0xFFFF;
+        while (SPI_ReadWriteByte(0xFF) != 0xFE && timeout--);
+        if (timeout == 0) { res = 0xFF; break; }
+
+        // 使用 DMA 接收 512 字节
+        g_dma_rx_done = 0;
+        HAL_SPI_Receive_DMA(&hspi1, buf + (i * 512), 512);
+
+        // 增加安全超时，防止硬件故障导致死循环
+        timeout = 0xFFFF;
+        while (!g_dma_rx_done && timeout--);
+
+        // 接收 2 字节 CRC
+        SPI_ReadWriteByte(0xFF);
+        SPI_ReadWriteByte(0xFF);
     }
+
     SD_CS_HIGH();
+    SPI_ReadWriteByte(0xFF); // 释放总线
+    return res;
+}
+
+
+// 1. 等待 SD 卡写完成 (忙检测)
+// SD 卡在写入数据时会将 MISO 拉低，直到内部操作完成
+static uint8_t SD_WaitWriteDone(void) {
+    uint32_t timeout = 0xFFFFF;
+    while (SPI_ReadWriteByte(0xFF) != 0xFF) {
+        if (timeout-- == 0) return 1; // 超时
+    }
+    return 0;
+}
+
+// 2. 写磁盘函数
+uint8_t SD_WriteDisk(uint8_t* buf, uint32_t sector, uint8_t cnt) {
+    uint8_t res = 0;
+
+    for (uint8_t i = 0; i < cnt; i++) {
+        // 发送写单块命令
+        res = SD_SendCmd(CMD24, sector + i, 0xFF);
+        if (res != 0) break;
+
+        SD_CS_LOW();
+        // A. 发送起始令牌 0xFE
+        SPI_ReadWriteByte(0xFF); // 缓冲
+        SPI_ReadWriteByte(0xFE);
+
+        // B. 写入 512 字节数据
+        // 因为写数据通常不频繁且量小，直接轮询写入即可，不需要复杂的 DMA
+        for (uint16_t j = 0; j < 512; j++) {
+            SPI_ReadWriteByte(buf[j + (i * 512)]);
+        }
+
+        // C. 发送 2 字节伪 CRC
+        SPI_ReadWriteByte(0xFF);
+        SPI_ReadWriteByte(0xFF);
+
+        // D. 读取响应
+        // 响应格式：xxx00101 (0x05) 代表数据已被接受
+        uint8_t response = SPI_ReadWriteByte(0xFF);
+        if ((response & 0x1F) != 0x05) {
+            res = 1;
+            SD_CS_HIGH();
+            break;
+        }
+
+        // E. 等待卡内部写完成
+        if (SD_WaitWriteDone() != 0) {
+            res = 2;
+            SD_CS_HIGH();
+            break;
+        }
+        SD_CS_HIGH();
+    }
+
+    SPI_ReadWriteByte(0xFF); // 额外时钟
     return res;
 }
