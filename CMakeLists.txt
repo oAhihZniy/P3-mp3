@@ -52,12 +52,31 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+    User/HelixMP3Decoder/mp3dec.c
+    User/HelixMP3Decoder/mp3tabs.c
+    User/HelixMP3Decoder/real/bitstream.c
+    User/HelixMP3Decoder/real/buffers.c
+    User/HelixMP3Decoder/real/dct32.c
+    User/HelixMP3Decoder/real/dequant.c
+    User/HelixMP3Decoder/real/dqchan.c
+    User/HelixMP3Decoder/real/huffman.c
+    User/HelixMP3Decoder/real/hufftabs.c
+    User/HelixMP3Decoder/real/imdct.c
+    User/HelixMP3Decoder/real/scalfact.c
+    User/HelixMP3Decoder/real/stproc.c
+    User/HelixMP3Decoder/real/subband.c
+    User/HelixMP3Decoder/real/trigtabs.c
+    User/HelixMP3Decoder/real/arm/asmmisc.s
+    User/HelixMP3Decoder/real/arm/asmpoly_thumb2.s
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
     User
+    User/HelixMP3Decoder
+    User/HelixMP3Decoder/pub
+    User/HelixMP3Decoder/real
 )
 
 # Add project symbols (macros)

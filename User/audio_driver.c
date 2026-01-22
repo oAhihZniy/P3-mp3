@@ -1,61 +1,148 @@
 #include "audio_driver.h"
+#include "fatfs.h"
+#include "mp3dec.h"
 #include "i2s.h"
+#include <string.h>
 
-// 缓冲区大小 (必须是 4 的倍数，因为是 16bit 双声道)
-#define AUDIO_BUF_SIZE 4096
+/* --- 私有变量 --- */
+static HMP3Decoder hMP3Decoder;
+static MP3FrameInfo mp3FrameInfo;
+static FIL mp3File;
+static AudioStatus_t audioStatus = AUDIO_IDLE;
 
-// 音频缓冲区
-uint16_t AudioBuffer[AUDIO_BUF_SIZE];
+// 缓冲区定义
+uint16_t AudioBuffer[AUDIO_BUF_SIZE / 2]; // 16-bit PCM 数组
+static uint8_t mp3InBuf[MP3_IN_BUF_SIZE]; // MP3 原始数据缓冲
+static uint8_t *readPtr = mp3InBuf;       // 当前解码位置指针
+static int bytesLeft = 0;                 // 缓冲区剩余未解数据字节数
 
-// 播放状态枚举
-typedef enum {
-    AUDIO_STATE_IDLE,
-    AUDIO_STATE_PLAYING,
-    AUDIO_STATE_STOP
-} AudioState_t;
+// 标志位：0-无动作, 1-需填充前半部, 2-需填充后半部
+static volatile uint8_t fillBufferFlag = 0;
 
-volatile AudioState_t g_AudioState = AUDIO_STATE_IDLE;
+/* --- 内部私有函数 --- */
 
-// 1. 启动播放
-void Audio_Start(void) {
-    // 初始化缓冲区为静音 (0)
-    for(int i=0; i<AUDIO_BUF_SIZE; i++) AudioBuffer[i] = 0;
+/**
+ * 从 SD 卡读取数据填充 MP3 输入缓冲区
+ */
+static int Fill_MP3_InputBuffer(void) {
+    UINT br;
+    // 1. 将剩余数据移到开头
+    if (bytesLeft > 0 && readPtr != mp3InBuf) {
+        memmove(mp3InBuf, readPtr, bytesLeft);
+    }
+    readPtr = mp3InBuf;
 
-    g_AudioState = AUDIO_STATE_PLAYING;
-    // 启动 DMA 循环传输
-    // 注意：第三个参数是数据量，uint16_t 传输次数是 AUDIO_BUF_SIZE
-    HAL_I2S_Transmit_DMA(&hi2s2, AudioBuffer, AUDIO_BUF_SIZE);
+    // 2. 从 SD 卡读取新数据填满剩余空间
+    FRESULT res = f_read(&mp3File, mp3InBuf + bytesLeft, MP3_IN_BUF_SIZE - bytesLeft, &br);
+    if (res != FR_OK) return -1;
+
+    bytesLeft += br;
+    return br;
 }
 
-// 2. 停止播放
+/**
+ * 解码一帧 MP3 并写入对应的 PCM 缓冲区位置
+ * offset: PCM 缓冲区的起始位置 (0 或 AUDIO_BUF_SIZE/4)
+ */
+static int Decode_Next_Frame(uint32_t offset) {
+    // 数据量不足一帧，尝试读取
+    if (bytesLeft < 1024) {
+        if (Fill_MP3_InputBuffer() <= 0 && bytesLeft == 0) return -1; // 文件结束
+    }
+
+    // 寻找同步字
+    int syncOffset = MP3FindSyncWord(readPtr, bytesLeft);
+    if (syncOffset < 0) {
+        bytesLeft = 0; // 丢弃无效数据
+        return -2;
+    }
+    readPtr += syncOffset;
+    bytesLeft -= syncOffset;
+
+    // 解码到 PCM 缓冲区 (注意指针偏移和数据转换)
+    short *outPtr = (short *)&AudioBuffer[offset];
+    int err = MP3Decode(hMP3Decoder, &readPtr, &bytesLeft, outPtr, 0);
+
+    if (err == ERR_MP3_NONE) {
+        MP3GetLastFrameInfo(hMP3Decoder, &mp3FrameInfo);
+        // 如果这里采样率与 I2S 配置不符，可以动态调整 I2S 时钟 (进阶功能)
+    }
+    return err;
+}
+
+/* --- 外部公共接口 --- */
+
+void Audio_Init(void) {
+    hMP3Decoder = MP3InitDecoder();
+    audioStatus = AUDIO_IDLE;
+}
+
+FRESULT Audio_Play(const char* filename) {
+    Audio_Stop();
+
+    FRESULT res = f_open(&mp3File, filename, FA_READ);
+    if (res != FR_OK) {
+        audioStatus = AUDIO_ERROR;
+        return res;
+    }
+
+    // 重置指针和状态
+    bytesLeft = 0;
+    readPtr = mp3InBuf;
+    fillBufferFlag = 0;
+    memset(AudioBuffer, 0, sizeof(AudioBuffer));
+
+    // 预解码前两块，填满缓冲区
+    Decode_Next_Frame(0);
+    Decode_Next_Frame(AUDIO_BUF_SIZE / 4);
+
+    // 启动 I2S DMA 传输 (Circular 模式)
+    // 参数 3 是传输次数，16-bit 模式下为数组长度
+    HAL_I2S_Transmit_DMA(&hi2s2, AudioBuffer, sizeof(AudioBuffer)/2);
+
+    audioStatus = AUDIO_PLAYING;
+    return FR_OK;
+}
+
 void Audio_Stop(void) {
     HAL_I2S_DMAStop(&hi2s2);
-    g_AudioState = AUDIO_STATE_STOP;
+    f_close(&mp3File);
+    audioStatus = AUDIO_STOPPED;
 }
 
-// 3. 关键回调：DMA 传输到一半 (前半部发完了)
+void Audio_Process(void) {
+    if (audioStatus != AUDIO_PLAYING) return;
+
+    if (fillBufferFlag == 1) { // 需填前半部
+        if (Decode_Next_Frame(0) < 0) {
+            Audio_Stop(); // 播放结束
+        }
+        fillBufferFlag = 0;
+    }
+    else if (fillBufferFlag == 2) { // 需填后半部
+        if (Decode_Next_Frame(AUDIO_BUF_SIZE / 4) < 0) {
+            Audio_Stop(); // 播放结束
+        }
+        fillBufferFlag = 0;
+    }
+}
+
+AudioStatus_t Audio_GetStatus(void) {
+    return audioStatus;
+}
+
+/* --- 中断回调函数 --- */
+
+// DMA 传输过半 (开始播后半部，需填前半部)
 void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s) {
-    if(hi2s->Instance == SPI2) { // I2S2 在内部对应 SPI2
-        // 这里设置标志位，通知主循环：快把新的 MP3 解码数据填入 AudioBuffer[0 ... AUDIO_BUF_SIZE/2 - 1]
-        // 稍后在集成 Helix 库时会用到
+    if (hi2s->Instance == SPI2) {
+        fillBufferFlag = 1;
     }
 }
 
-// 4. 关键回调：DMA 传输完成 (后半部发完了)
+// DMA 传输完成 (开始播前半部，需填后半部)
 void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
-    if(hi2s->Instance == SPI2) {
-        // 这里设置标志位，通知主循环：快把新的 MP3 解码数据填入 AudioBuffer[AUDIO_BUF_SIZE/2 ... AUDIO_BUF_SIZE - 1]
-    }
-}
-
-// 生成 1kHz 的正弦波填满缓冲区 测试用
-void Audio_GenerateTestTone(void) {
-    float frequency = 1000.0;
-    float sample_rate = 44100.0;
-    for (int i = 0; i < AUDIO_BUF_SIZE; i += 2) {
-        // 计算采样值
-        int16_t sample = (int16_t)(3000.0 * sin(2.0 * M_PI * frequency * (i/2.0) / sample_rate));
-        AudioBuffer[i] = sample;     // 左声道
-        AudioBuffer[i+1] = sample;   // 右声道
+    if (hi2s->Instance == SPI2) {
+        fillBufferFlag = 2;
     }
 }
