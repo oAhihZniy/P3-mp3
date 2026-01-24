@@ -1,12 +1,16 @@
 #include "oled_driver.h"
 
 #include <string.h>
-
+#include "fatfs.h"
 #include "i2c.h"
 #include "oled_font.h"
 
 uint8_t OLED_Buffer[OLED_BUFFER_SIZE];
 volatile uint8_t oled_ready = 1; // 1代表空闲，0代表正在DMA传输
+
+static FIL fontFile;       // 长期打开的字库文件句柄
+static uint8_t font_ok = 0; // 字库状态标志
+
 
 // SSD1306 初始化命令序列
 static const uint8_t init_cmds[] = {
@@ -218,5 +222,79 @@ void OLED_ShowScrollString(uint8_t x, uint8_t y, uint8_t width, char *str, uint1
         if (char_x > -8 && char_x < x + width) {
             OLED_ShowChar(char_x, y, str[i], 1);
         }
+    }
+}
+
+
+
+/**
+ * 初始化字库文件（在 main 中挂载 SD 卡后调用一次）
+ */
+FRESULT OLED_FontInit(const char* path) {
+    FRESULT res = f_open(&fontFile, path, FA_READ);
+    if (res == FR_OK) font_ok = 1;
+    return res;
+}
+
+/**
+ * 从 SD 卡读取 16x16 点阵并显示
+ * unicode: 字符的编码值
+ */
+void OLED_ShowSDChar(uint8_t x, uint8_t y, uint32_t unicode) {
+    if (!font_ok) return;
+
+    uint8_t glyph[FONT_SD_BYTES]; // 32字节临时缓存
+    UINT br;
+
+    // 1. 计算偏移量 (核心逻辑)
+    // 注意：这里的算法取决于你的字库文件是如何排列的
+    // 如果是纯 Unicode 顺序排列：
+    uint32_t offset = unicode * FONT_SD_BYTES;
+
+    // 2. 寻址并读取
+    // 虽然 audio_driver 也在读卡，但读取 32 字节极快，不会影响播放
+    f_lseek(&fontFile, offset);
+    if (f_read(&fontFile, glyph, FONT_SD_BYTES, &br) != FR_OK || br != FONT_SD_BYTES) {
+        return; // 读取失败
+    }
+
+    // 3. 渲染到显存
+    // 这里的逻辑处理 16x16 的逐行式点阵
+    for (uint8_t i = 0; i < 16; i++) { // 16行
+        for (uint8_t j = 0; j < 8; j++) { // 每行前8位
+            if (glyph[i * 2] & (0x80 >> j))
+                OLED_DrawPoint(x + j, y + i, 1);
+
+            if (glyph[i * 2 + 1] & (0x80 >> j)) // 每行后8位
+                OLED_DrawPoint(x + j + 8, y + i, 1);
+        }
+    }
+}
+
+/**
+ * 处理 UTF-8 字符串并逐个显示
+ */
+void OLED_ShowSDString(uint8_t x, uint8_t y, const char* utf8_str) {
+    const uint8_t* p = (const uint8_t*)utf8_str;
+    uint32_t unicode;
+
+    while (*p) {
+        // 解码 UTF-8 (标准算法)
+        if ((*p & 0x80) == 0) { // ASCII 字符 (1字节)
+            OLED_ShowChar(x, y, *p, 1); // 直接用之前写好的 Flash 字库
+            x += 8;
+            p++;
+        } else if ((*p & 0xE0) == 0xE0) { // 中日韩常用汉字 (3字节)
+            unicode = ((uint32_t)(p[0] & 0x0F) << 12) |
+                      ((uint32_t)(p[1] & 0x3F) << 6) |
+                      ((uint32_t)(p[2] & 0x3F));
+            OLED_ShowSDChar(x, y, unicode);
+            x += 16;
+            p += 3;
+        } else {
+            p++; // 其他暂不处理
+        }
+
+        if (x > 120) break; // 换行或截断逻辑
     }
 }
