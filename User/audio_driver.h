@@ -24,4 +24,9 @@ void Audio_Stop(void);
 void Audio_Process(void);
 AudioStatus_t Audio_GetStatus(void);
 
+// static void Apply_Volume(uint16_t* buffer, uint32_t len);
+void Audio_PauseResume(void);// 切换播放/暂停状态
+void Audio_SetVolume(uint8_t vol);// 设置音量 (0-100)
+uint8_t Audio_GetVolume(void);// 获取当前音量
+
 #endif

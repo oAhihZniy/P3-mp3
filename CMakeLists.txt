@@ -39,7 +39,9 @@ add_executable(${CMAKE_PROJECT_NAME}
         User/sd_card_spi.c
         User/sd_card_spi.h
         User/audio_driver.c
-        User/audio_driver.h)
+        User/audio_driver.h
+        Core/Src/app_task.c
+        Core/Inc/app_task.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

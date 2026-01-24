@@ -9,6 +9,8 @@ static HMP3Decoder hMP3Decoder;
 static MP3FrameInfo mp3FrameInfo;
 static FIL mp3File;
 static AudioStatus_t audioStatus = AUDIO_IDLE;
+// 定义音量，范围 0~100
+static uint8_t volume = 30;// 默认音量 30%
 
 // 缓冲区定义
 uint16_t AudioBuffer[AUDIO_BUF_SIZE / 2]; // 16-bit PCM 数组
@@ -41,6 +43,19 @@ static int Fill_MP3_InputBuffer(void) {
 }
 
 /**
+ * 内部函数：调节 PCM 数据的音量
+ */
+static void Apply_Volume(short* pcm_samples, int num_samples) {
+    if (volume == 100) return; // 100% 音量无需计算，节省 CPU
+
+    for (int i = 0; i < num_samples; i++) {
+        // 使用 32 位整数中转运算，防止 16 位溢出和精度丢失
+        int32_t temp = (int32_t)pcm_samples[i];
+        pcm_samples[i] = (short)((temp * volume) / 100);
+    }
+}
+
+/**
  * 解码一帧 MP3 并写入对应的 PCM 缓冲区位置
  * offset: PCM 缓冲区的起始位置 (0 或 AUDIO_BUF_SIZE/4)
  */
@@ -66,6 +81,11 @@ static int Decode_Next_Frame(uint32_t offset) {
     if (err == ERR_MP3_NONE) {
         MP3GetLastFrameInfo(hMP3Decoder, &mp3FrameInfo);
         // 如果这里采样率与 I2S 配置不符，可以动态调整 I2S 时钟 (进阶功能)
+
+        // 【核心点】在这里立即调节音量
+        // 参数 1：当前写入的缓冲区首地址
+        // 参数 2：这一帧输出的采样总数 (左右声道合计)
+        Apply_Volume(outPtr, mp3FrameInfo.outputSamps);
     }
     return err;
 }
@@ -77,7 +97,7 @@ void Audio_Init(void) {
     audioStatus = AUDIO_IDLE;
 }
 
-FRESULT Audio_Play(const char* filename) {
+FRESULT Audio_Play(const char* filename) {// 开始播放指定文件
     Audio_Stop();
 
     FRESULT res = f_open(&mp3File, filename, FA_READ);
@@ -104,13 +124,13 @@ FRESULT Audio_Play(const char* filename) {
     return FR_OK;
 }
 
-void Audio_Stop(void) {
+void Audio_Stop(void) {// 停止播放
     HAL_I2S_DMAStop(&hi2s2);
     f_close(&mp3File);
     audioStatus = AUDIO_STOPPED;
 }
 
-void Audio_Process(void) {
+void Audio_Process(void) {// 主循环中调用，处理缓冲区填充
     if (audioStatus != AUDIO_PLAYING) return;
 
     if (fillBufferFlag == 1) { // 需填前半部
@@ -127,7 +147,7 @@ void Audio_Process(void) {
     }
 }
 
-AudioStatus_t Audio_GetStatus(void) {
+AudioStatus_t Audio_GetStatus(void) {// 获取当前播放状态
     return audioStatus;
 }
 
@@ -145,4 +165,30 @@ void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
     if (hi2s->Instance == SPI2) {
         fillBufferFlag = 2;
     }
+}
+
+
+/**
+ * 暂停/恢复切换
+ */
+void Audio_PauseResume(void) {
+    if (audioStatus == AUDIO_PLAYING) {
+        HAL_I2S_DMAPause(&hi2s2); // 硬件层暂停 DMA
+        audioStatus = AUDIO_STOPPED;
+    } else if (audioStatus == AUDIO_STOPPED) {
+        HAL_I2S_DMAResume(&hi2s2); // 硬件层恢复 DMA
+        audioStatus = AUDIO_PLAYING;
+    }
+}
+
+/**
+ * 设置音量接口
+ */
+void Audio_SetVolume(uint8_t vol) {
+    if (vol > 100) vol = 100;
+    volume = vol;
+}
+
+uint8_t Audio_GetVolume(void) {
+    return volume;
 }
