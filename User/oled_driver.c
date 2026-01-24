@@ -1,9 +1,14 @@
 #include "oled_driver.h"
 
+#include <stdio.h>
 #include <string.h>
+
+#include "audio_driver.h"
 #include "fatfs.h"
 #include "i2c.h"
+#include "oled_app.h"
 #include "oled_font.h"
+#include "playlist.h"
 
 uint8_t OLED_Buffer[OLED_BUFFER_SIZE];
 volatile uint8_t oled_ready = 1; // 1代表空闲，0代表正在DMA传输
@@ -176,22 +181,33 @@ void OLED_DrawProgressBar(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t pe
 
 
 /* main.c 循环任务 后面在编辑这个 */
-void UI_Update_Task(void) {
+void UI_Refresh_Task(void) {
+    char time_str[16];
+    uint32_t elapsed = Audio_GetElapsedSec();
+
     OLED_Clear();
 
-    // 1. 显示状态
-    OLED_ShowString(0, 0, "PLAYING", 1);
+    // 1. 顶部：显示索引和状态
+    // 例如: "01/15  [PLAY]"
+    snprintf(time_str, sizeof(time_str), "%02d/%02d  %s",
+             g_playlist.current_index + 1, g_playlist.total_count,
+             (Audio_GetStatus() == AUDIO_PLAYING) ? ">" : "||");
+    OLED_ShowString(0, 0, time_str, 1);
 
-    // 2. 显示音量 (假设音量是 50)
-    OLED_ShowString(80, 0, "V:50", 1);
+    // 2. 中部：滚动显示歌名
+    UI_DrawScrollingTitle(12, g_playlist.current_filename, HAL_GetTick());
 
-    // 3. 显示歌名 (暂时先用英文)
-    OLED_ShowString(0, 16, "Burn My Dread", 1);
+    // 3. 底部：进度条 + 时间
+    // 进度条占据 0-90 像素
+    uint8_t progress = 0;
+    // 注意：总时长需要解析 MP3 Header 才能获得，初期可以先只显示已播时间
+    OLED_DrawProgressBar(0, 28, 90, 4, progress);
 
-    // 4. 显示播放进度 (假设当前播放到 35%)
-    OLED_DrawProgressBar(0, 28, 128, 4, 35);
+    // 时间显示在右下角
+    snprintf(time_str, sizeof(time_str), "%02lu:%02lu", elapsed / 60, elapsed % 60);
+    OLED_ShowString(95, 26, time_str, 1);
 
-    OLED_Update(); // 提交 DMA 刷新
+    OLED_Update(); // DMA 刷屏
 }
 
 /**
@@ -298,3 +314,5 @@ void OLED_ShowSDString(uint8_t x, uint8_t y, const char* utf8_str) {
         if (x > 120) break; // 换行或截断逻辑
     }
 }
+
+

@@ -29,4 +29,7 @@ void Audio_PauseResume(void);// 切换播放/暂停状态
 void Audio_SetVolume(uint8_t vol);// 设置音量 (0-100)
 uint8_t Audio_GetVolume(void);// 获取当前音量
 
+uint32_t Audio_GetElapsedSec(void);
+void Audio_ResetTimer(void);
+
 #endif

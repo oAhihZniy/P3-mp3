@@ -46,7 +46,9 @@ add_executable(${CMAKE_PROJECT_NAME}
         User/oled_driver.h
         User/oled_font.h
         User/playlist.c
-        User/playlist.h)
+        User/playlist.h
+        User/oled_app.c
+        User/oled_app.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

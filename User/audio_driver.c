@@ -12,6 +12,9 @@ static AudioStatus_t audioStatus = AUDIO_IDLE;
 // 定义音量，范围 0~100
 static uint8_t volume = 30;// 默认音量 30%
 
+uint32_t g_PlayedSamples = 0;
+uint32_t g_SampleRate = 44100; // 默认
+
 // 缓冲区定义
 uint16_t AudioBuffer[AUDIO_BUF_SIZE / 2]; // 16-bit PCM 数组
 static uint8_t mp3InBuf[MP3_IN_BUF_SIZE]; // MP3 原始数据缓冲
@@ -86,6 +89,8 @@ static int Decode_Next_Frame(uint32_t offset) {
         // 参数 1：当前写入的缓冲区首地址
         // 参数 2：这一帧输出的采样总数 (左右声道合计)
         Apply_Volume(outPtr, mp3FrameInfo.outputSamps);
+        g_PlayedSamples += mp3FrameInfo.outputSamps / 2; // 除以2是因为左右声道算一个采样时间
+        g_SampleRate = mp3FrameInfo.samprate;
     }
     return err;
 }
@@ -191,4 +196,15 @@ void Audio_SetVolume(uint8_t vol) {
 
 uint8_t Audio_GetVolume(void) {
     return volume;
+}
+
+// 获取已播放秒数
+uint32_t Audio_GetElapsedSec(void) {
+    if (g_SampleRate == 0) return 0;
+    return g_PlayedSamples / g_SampleRate;
+}
+
+// 切歌时记得重置
+void Audio_ResetTimer(void) {
+    g_PlayedSamples = 0;
 }
