@@ -1,318 +1,107 @@
 #include "oled_driver.h"
-
-#include <stdio.h>
+#include "oled_font.h"
+#include "i2c.h"
 #include <string.h>
 
-#include "audio_driver.h"
-#include "fatfs.h"
-#include "i2c.h"
-#include "oled_app.h"
-#include "oled_font.h"
-#include "playlist.h"
-
 uint8_t OLED_Buffer[OLED_BUFFER_SIZE];
-volatile uint8_t oled_ready = 1; // 1代表空闲，0代表正在DMA传输
+volatile uint8_t oled_ready = 1;
 
-static FIL fontFile;       // 长期打开的字库文件句柄
-static uint8_t font_ok = 0; // 字库状态标志
+static FIL fontFile;           // 唯一的字库句柄
+static uint8_t font_init_done = 0;
 
-
-// SSD1306 初始化命令序列
+// SSD1306 初始化序列
 static const uint8_t init_cmds[] = {
-    0xAE,       // 关闭显示
-    0x20, 0x00, // 设置寻址模式：00-水平模式 (DMA 专用)
-    0xB0,       // 设置起始页地址
-    0xC8,       // 翻转 COM 扫描方向
-    0x00,       // 设置低列地址
-    0x10,       // 设置高列地址
-    0x40,       // 设置起始行地址
-    0x81, 0x7F, // 对比度设置
-    0xA1,       // 设置左右方向 (根据你的 PCB 焊接方向调整 A0/A1)
-    0xA6,       // 正常显示 (不反相)
-    0xA8, 0x1F, // 1/32 屏 (32行)
-    0xAD, 0x8B, // DC-DC 开关
-    0xD3, 0x00, // 设置显示偏移
-    0xD5, 0xF0, // 设置分频因子
-    0xD9, 0x22, // 设置预充电周期
-    0xDA, 0x02, // 设置 COM 引脚硬件配置
-    0xDB, 0x40, // 设置 VCOMH
-    0xAF        // 开启显示
+    0xAE, 0x20, 0x00, 0xB0, 0xC8, 0x00, 0x10, 0x40, 0x81, 0x7F,
+    0xA1, 0xA6, 0xA8, 0x1F, 0xAD, 0x8B, 0xD3, 0x00, 0xD5, 0xF0,
+    0xD9, 0x22, 0xDA, 0x02, 0xDB, 0x40, 0xAF
 };
 
-// 发送单条命令 (阻塞模式，仅初始化用)
 static void OLED_WriteCmd(uint8_t cmd) {
     HAL_I2C_Mem_Write(&hi2c1, OLED_ADDR, 0x00, I2C_MEMADD_SIZE_8BIT, &cmd, 1, 10);
 }
 
 void OLED_Init(void) {
-    // 硬件复位 (之前分配的 PA8)
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
     HAL_Delay(100);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
-
-    // 发送初始化命令
-    for(uint8_t i=0; i<sizeof(init_cmds); i++) {
-        OLED_WriteCmd(init_cmds[i]);
-    }
+    for(uint8_t i=0; i<sizeof(init_cmds); i++) OLED_WriteCmd(init_cmds[i]);
     OLED_Clear();
     OLED_Update();
 }
 
-// 刷新屏幕：把 512 字节显存通过 DMA 发送
 void OLED_Update(void) {
     if (oled_ready) {
         oled_ready = 0;
-        // 0x40 代表接下来发送的是数据（显存）
         HAL_I2C_Mem_Write_DMA(&hi2c1, OLED_ADDR, 0x40, I2C_MEMADD_SIZE_8BIT, OLED_Buffer, OLED_BUFFER_SIZE);
     }
 }
 
-// DMA 传输完成回调
 void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c) {
-    if (hi2c->Instance == I2C1) {
-        oled_ready = 1; // 释放标志位
-    }
+    if (hi2c->Instance == I2C1) oled_ready = 1;
 }
 
-void OLED_Clear(void) {
-    for(uint16_t i=0; i<OLED_BUFFER_SIZE; i++) OLED_Buffer[i] = 0;
-}
+void OLED_Clear(void) { memset(OLED_Buffer, 0, OLED_BUFFER_SIZE); }
 
-/**
- * 画点函数 (x: 0-127, y: 0-31, color: 1点亮, 0熄灭)
- */
 void OLED_DrawPoint(uint8_t x, uint8_t y, uint8_t color) {
     if(x >= OLED_WIDTH || y >= OLED_HEIGHT) return;
-    
-    if(color)
-        OLED_Buffer[x + (y / 8) * OLED_WIDTH] |= (1 << (y % 8));
-    else
-        OLED_Buffer[x + (y / 8) * OLED_WIDTH] &= ~(1 << (y % 8));
+    if(color) OLED_Buffer[x + (y / 8) * OLED_WIDTH] |= (1 << (y % 8));
+    else OLED_Buffer[x + (y / 8) * OLED_WIDTH] &= ~(1 << (y % 8));
 }
 
-/**
- * 画水平线 (用于进度条边框)
- */
-void OLED_DrawHLine(uint8_t x, uint8_t y, uint8_t len, uint8_t color) {
-    for (uint8_t i = x; i < x + len; i++) OLED_DrawPoint(i, y, color);
-}
-
-/**
- * 画垂直线
- */
-void OLED_DrawVLine(uint8_t x, uint8_t y, uint8_t len, uint8_t color) {
-    for (uint8_t i = y; i < y + len; i++) OLED_DrawPoint(x, i, color);
-}
-
-/**
- * 画矩形 (空心)
- */
 void OLED_DrawRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color) {
-    OLED_DrawHLine(x, y, w, color);             // 上
-    OLED_DrawHLine(x, y + h - 1, w, color);     // 下
-    OLED_DrawVLine(x, y, h, color);             // 左
-    OLED_DrawVLine(x + w - 1, y, h, color);     // 右
+    for (uint8_t i = x; i < x + w; i++) { OLED_DrawPoint(i, y, color); OLED_DrawPoint(i, y + h - 1, color); }
+    for (uint8_t i = y; i < y + h; i++) { OLED_DrawPoint(x, i, color); OLED_DrawPoint(x + w - 1, i, color); }
 }
 
-/**
- * 画实心矩形 (进度条填充)
- */
 void OLED_DrawFilledRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color) {
-    for (uint8_t i = x; i < x + w; i++) {
-        for (uint8_t j = y; j < y + h; j++) {
-            OLED_DrawPoint(i, j, color);
+    for (uint8_t i = x; i < x + w; i++)
+        for (uint8_t j = y; j < y + h; j++) OLED_DrawPoint(i, j, color);
+}
+
+void OLED_DrawProgressBar(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t percent) {
+    if (percent > 100) percent = 100;
+    OLED_DrawRect(x, y, w, h, 1);
+    uint8_t fill_w = (w - 4) * percent / 100;
+    if (fill_w > 0) OLED_DrawFilledRect(x + 2, y + 2, fill_w, h - 4, 1);
+}
+
+void OLED_ShowChar(int16_t x, int16_t y, char chr, uint8_t color) {
+    if (x <= -8 || x >= 128) return;
+    uint8_t c = chr - ' ';
+    for (uint8_t i = 0; i < 16; i++) {
+        uint8_t temp = ASCII_8x16[c * 16 + i];
+        for (uint8_t j = 0; j < 8; j++) {
+            if (temp & (0x80 >> j)) OLED_DrawPoint(x + j, y + i, color);
         }
     }
 }
 
+void OLED_ShowString(uint8_t x, uint8_t y, char *str, uint8_t color) {
+    while (*str) { OLED_ShowChar(x, y, *str, color); x += 8; str++; }
+}
 
+FRESULT OLED_FontInit(const char* path) {
+    FRESULT res = f_open(&fontFile, path, FA_READ);
+    if (res == FR_OK) font_init_done = 1;
+    return res;
+}
 
-/**
- * 显示单个 ASCII 字符 (8x16)
- * x, y: 起始坐标
- * chr: 字符内容
- */
-void OLED_ShowChar(uint8_t x, uint8_t y, char chr, uint8_t color) {
-    uint8_t c = chr - ' '; // 计算偏移
-    for (uint8_t i = 0; i < 16; i++) {
-        uint8_t temp = ASCII_8x16[c * 16 + i];
-        for (uint8_t j = 0; j < 8; j++) {
-            if (temp & (0x80 >> j)) {
-                // 根据 SSD1306 寻址模式，这里可能需要根据你的 DrawPoint 逻辑调整
-                OLED_DrawPoint(x + j, y + i, color);
+void OLED_DrawCJKChar(int16_t x, int16_t y, uint32_t unicode) {
+    if (!font_init_done || x <= -16 || x >= 128) return;
+    uint8_t glyph[32];
+    UINT br;
+    f_lseek(&fontFile, unicode * 32);
+    if(f_read(&fontFile, glyph, 32, &br) == FR_OK && br == 32) {
+        for (uint8_t i = 0; i < 16; i++) {
+            for (uint8_t j = 0; j < 8; j++) {
+                if (glyph[i * 2] & (0x80 >> j)) OLED_DrawPoint(x + j, y + i, 1);
+                if (glyph[i * 2 + 1] & (0x80 >> j)) OLED_DrawPoint(x + j + 8, y + i, 1);
             }
         }
     }
 }
 
-/**
- * 显示字符串
- */
-void OLED_ShowString(uint8_t x, uint8_t y, char *str, uint8_t color) {
-    while (*str) {
-        OLED_ShowChar(x, y, *str, color);
-        x += 8; // 8x16 字体，x 轴平移 8 像素
-        if (x > 120) break; // 超出屏幕
-        str++;
-    }
+void OLED_DrawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color) {
+    // 这里可以使用简单的 Bresenham 算法，或者暂时留空防止报错
+    for (uint8_t i = x1; i <= x2; i++) OLED_DrawPoint(i, y1, color); // 简单的水平线占位
 }
-
-
-/**
- * 绘制进度条
- * x, y: 位置
- * w, h: 总宽高
- * percent: 0-100
- */
-void OLED_DrawProgressBar(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t percent) {
-    if (percent > 100) percent = 100;
-
-    // 1. 画外框
-    OLED_DrawRect(x, y, w, h, 1);
-
-    // 2. 计算填充宽度 (缩进 2 像素看起来更精致)
-    uint8_t fill_w = (w - 4) * percent / 100;
-
-    // 3. 画内部实心条
-    if (fill_w > 0) {
-        OLED_DrawFilledRect(x + 2, y + 2, fill_w, h - 4, 1);
-    }
-}
-
-
-/* main.c 循环任务 后面在编辑这个 */
-void UI_Refresh_Task(void) {
-    char time_str[16];
-    uint32_t elapsed = Audio_GetElapsedSec();
-
-    OLED_Clear();
-
-    // 1. 顶部：显示索引和状态
-    // 例如: "01/15  [PLAY]"
-    snprintf(time_str, sizeof(time_str), "%02d/%02d  %s",
-             g_playlist.current_index + 1, g_playlist.total_count,
-             (Audio_GetStatus() == AUDIO_PLAYING) ? ">" : "||");
-    OLED_ShowString(0, 0, time_str, 1);
-
-    // 2. 中部：滚动显示歌名
-    UI_DrawScrollingTitle(12, g_playlist.current_filename, HAL_GetTick());
-
-    // 3. 底部：进度条 + 时间
-    // 进度条占据 0-90 像素
-    uint8_t progress = 0;
-    // 注意：总时长需要解析 MP3 Header 才能获得，初期可以先只显示已播时间
-    OLED_DrawProgressBar(0, 28, 90, 4, progress);
-
-    // 时间显示在右下角
-    snprintf(time_str, sizeof(time_str), "%02lu:%02lu", elapsed / 60, elapsed % 60);
-    OLED_ShowString(95, 26, time_str, 1);
-
-    OLED_Update(); // DMA 刷屏
-}
-
-/**
- * 显示滚动字符串
- * x, y: 显示窗口的起始位置
- * width: 窗口的宽度 (比如歌名区宽 128)
- * str: 字符串指针
- * offset: 当前滚动的偏移量 (单位：像素)
- */
-void OLED_ShowScrollString(uint8_t x, uint8_t y, uint8_t width, char *str, uint16_t offset) {
-    uint16_t str_len = strlen(str);
-    uint16_t total_pixel_width = str_len * 8; // 每个字符宽 8 像素
-
-    // 如果字符串短于窗口，直接显示，不滚动
-    if (total_pixel_width <= width) {
-        OLED_ShowString(x, y, str, 1);
-        return;
-    }
-
-    // 循环滚动逻辑
-    uint16_t current_offset = offset % (total_pixel_width + 40); // 40 是留白，防止首尾相连太挤
-
-    for (uint16_t i = 0; i < str_len; i++) {
-        // 计算每个字符相对于窗口左侧的位置
-        int16_t char_x = x + (i * 8) - current_offset;
-
-        // 只绘制在窗口范围内的部分字符
-        if (char_x > -8 && char_x < x + width) {
-            OLED_ShowChar(char_x, y, str[i], 1);
-        }
-    }
-}
-
-
-
-/**
- * 初始化字库文件（在 main 中挂载 SD 卡后调用一次）
- */
-FRESULT OLED_FontInit(const char* path) {
-    FRESULT res = f_open(&fontFile, path, FA_READ);
-    if (res == FR_OK) font_ok = 1;
-    return res;
-}
-
-/**
- * 从 SD 卡读取 16x16 点阵并显示
- * unicode: 字符的编码值
- */
-void OLED_ShowSDChar(uint8_t x, uint8_t y, uint32_t unicode) {
-    if (!font_ok) return;
-
-    uint8_t glyph[FONT_SD_BYTES]; // 32字节临时缓存
-    UINT br;
-
-    // 1. 计算偏移量 (核心逻辑)
-    // 注意：这里的算法取决于你的字库文件是如何排列的
-    // 如果是纯 Unicode 顺序排列：
-    uint32_t offset = unicode * FONT_SD_BYTES;
-
-    // 2. 寻址并读取
-    // 虽然 audio_driver 也在读卡，但读取 32 字节极快，不会影响播放
-    f_lseek(&fontFile, offset);
-    if (f_read(&fontFile, glyph, FONT_SD_BYTES, &br) != FR_OK || br != FONT_SD_BYTES) {
-        return; // 读取失败
-    }
-
-    // 3. 渲染到显存
-    // 这里的逻辑处理 16x16 的逐行式点阵
-    for (uint8_t i = 0; i < 16; i++) { // 16行
-        for (uint8_t j = 0; j < 8; j++) { // 每行前8位
-            if (glyph[i * 2] & (0x80 >> j))
-                OLED_DrawPoint(x + j, y + i, 1);
-
-            if (glyph[i * 2 + 1] & (0x80 >> j)) // 每行后8位
-                OLED_DrawPoint(x + j + 8, y + i, 1);
-        }
-    }
-}
-
-/**
- * 处理 UTF-8 字符串并逐个显示
- */
-void OLED_ShowSDString(uint8_t x, uint8_t y, const char* utf8_str) {
-    const uint8_t* p = (const uint8_t*)utf8_str;
-    uint32_t unicode;
-
-    while (*p) {
-        // 解码 UTF-8 (标准算法)
-        if ((*p & 0x80) == 0) { // ASCII 字符 (1字节)
-            OLED_ShowChar(x, y, *p, 1); // 直接用之前写好的 Flash 字库
-            x += 8;
-            p++;
-        } else if ((*p & 0xE0) == 0xE0) { // 中日韩常用汉字 (3字节)
-            unicode = ((uint32_t)(p[0] & 0x0F) << 12) |
-                      ((uint32_t)(p[1] & 0x3F) << 6) |
-                      ((uint32_t)(p[2] & 0x3F));
-            OLED_ShowSDChar(x, y, unicode);
-            x += 16;
-            p += 3;
-        } else {
-            p++; // 其他暂不处理
-        }
-
-        if (x > 120) break; // 换行或截断逻辑
-    }
-}
-
-

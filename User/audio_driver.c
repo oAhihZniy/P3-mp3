@@ -104,7 +104,7 @@ void Audio_Init(void) {
 
 FRESULT Audio_Play(const char* filename) {// 开始播放指定文件
     Audio_Stop();
-
+    Audio_ResetTimer();
     FRESULT res = f_open(&mp3File, filename, FA_READ);
     if (res != FR_OK) {
         audioStatus = AUDIO_ERROR;
@@ -141,6 +141,7 @@ void Audio_Process(void) {// 主循环中调用，处理缓冲区填充
     if (fillBufferFlag == 1) { // 需填前半部
         if (Decode_Next_Frame(0) < 0) {
             Audio_Stop(); // 播放结束
+            audioStatus = AUDIO_FINISHED; // 标记为自然结束
         }
         fillBufferFlag = 0;
     }

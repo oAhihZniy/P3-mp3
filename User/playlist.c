@@ -90,14 +90,12 @@ void Playlist_Prev(void) {
 }
 
 /**
- * 核心任务：检查歌曲是否自然播放结束
- * 放在 main 的 while 循环里调用
+ * 自动切歌检查
+ * 建议在处理完后将状态回归 IDLE，防止重复触发
  */
 void Playlist_AutoNext_Task(void) {
-    // 如果当前状态是 STOPPED 且不是因为人为操作停下来的
-    // 我们的 audio_driver 会在 MP3 解码完最后一帧后把状态设为 AUDIO_STOPPED
-    if (Audio_GetStatus() == AUDIO_STOPPED) {
-        // 自动播放下一曲
+    if (Audio_GetStatus() == AUDIO_FINISHED) {
+        // 播放下一首之前，先确保状态不再是 FINISHED
         Playlist_Next();
     }
 }

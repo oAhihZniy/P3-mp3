@@ -1,47 +1,83 @@
 #include "oled_app.h"
-
-#include <string.h>
 #include "oled_driver.h"
+#include "audio_driver.h"
+#include "playlist.h"
+#include <string.h>
+#include <stdio.h>
 
+// 内部工具：UTF-8 解码
+static uint8_t Get_Unicode_From_UTF8(const uint8_t* p, uint32_t* out_unicode) {
+    if ((p[0] & 0x80) == 0) { *out_unicode = p[0]; return 1; }
+    if ((p[0] & 0xE0) == 0xC0) { *out_unicode = ((p[0] & 0x1F) << 6) | (p[1] & 0x3F); return 2; }
+    if ((p[0] & 0xF0) == 0xE0) { *out_unicode = ((p[0] & 0x0F) << 12) | ((p[1] & 0x3F) << 6) | (p[2] & 0x3F); return 3; }
+    return 1;
+}
 
-/**
- * 绘制平滑滚动的歌名
- * y: 纵坐标 (建议 12-16)
- * str: 歌名字符串
- * tick: 系统时间戳或计数值，用于控制位移
- */
-void UI_DrawScrollingTitle(uint8_t y, const char* str, uint32_t tick) {
-    uint16_t len = strlen(str);
-    uint16_t text_width = len * 8; // ASCII 8x16 字体宽度
-    int16_t x_pos;
+void UI_DrawMixedScrollTitle(uint8_t y, const char* str, uint32_t tick) {
+    uint32_t unicode;
+    uint8_t bytes;
+    uint16_t total_w = 0;
+    const uint8_t* p = (const uint8_t*)str;
 
-    if (text_width <= 128) {
-        // 如果歌名短，居中显示
-        OLED_ShowString((128 - text_width) / 2, y, (char*)str, 1);
+    while (*p) {
+        bytes = Get_Unicode_From_UTF8(p, &unicode);
+        total_w += (bytes == 1) ? 8 : 16;
+        p += bytes;
+    }
+
+    if (total_w <= 128) {
+        int16_t start_x = (128 - total_w) / 2;
+        p = (const uint8_t*)str;
+        while (*p) {
+            bytes = Get_Unicode_From_UTF8(p, &unicode);
+            if (bytes == 1) OLED_ShowChar(start_x, y, (char)unicode, 1);
+            else OLED_DrawCJKChar(start_x, y, unicode);
+            start_x += (bytes == 1) ? 8 : 16;
+            p += bytes;
+        }
     } else {
-        // 滚动逻辑：每 30ms 移动 1 像素
-        // 循环长度 = 文字宽度 + 40 像素留白
-        uint16_t loop_width = text_width + 40;
-        uint16_t offset = (tick / 30) % loop_width;
+        uint16_t loop_w = total_w + 40;
+        int16_t scroll_offset = (tick / 30) % loop_w;
+        int16_t draw_x = -scroll_offset;
 
-        x_pos = -offset;
-
-        // 绘制第一遍
-        UI_OLED_ShowScrollString(x_pos, y, (char*)str);
-        // 如果第一遍快走完了，把第二遍接在后面，实现无缝循环
-        if (x_pos < (128 - text_width)) {
-            UI_OLED_ShowScrollString(x_pos + loop_width, y, (char*)str);
+        for (int loop = 0; loop < 2; loop++) {
+            p = (const uint8_t*)str;
+            int16_t temp_x = draw_x + (loop * loop_w);
+            while (*p) {
+                bytes = Get_Unicode_From_UTF8(p, &unicode);
+                if (temp_x > -16 && temp_x < 128) {
+                    if (bytes == 1) OLED_ShowChar(temp_x, y, (char)unicode, 1);
+                    else OLED_DrawCJKChar(temp_x, y, unicode);
+                }
+                temp_x += (bytes == 1) ? 8 : 16;
+                p += bytes;
+                if (temp_x >= 128 && loop == 1) break;
+            }
         }
     }
 }
 
-// 辅助函数：支持负数坐标的字符串显示（裁剪逻辑）
-static void UI_OLED_ShowScrollString(int16_t x, uint8_t y, char* str) {
-    while (*str) {
-        if (x > -8 && x < 128) { // 只画在屏幕范围内的字符
-            OLED_ShowChar(x, y, *str, 1);
-        }
-        x += 8;
-        str++;
-    }
+void UI_Refresh_Task(void) {
+    char info_str[32];
+    uint32_t elapsed = Audio_GetElapsedSec();
+
+    OLED_Clear();
+
+    // 1. 顶部：索引和播放状态 (P3 风格)
+    // 格式: "01/15  >" (播放) 或 "01/15  ||" (暂停)
+    snprintf(info_str, sizeof(info_str), "%02d/%02d  %s",
+             g_playlist.current_index + 1, g_playlist.total_count,
+             (Audio_GetStatus() == AUDIO_PLAYING) ? ">" : "||");
+    OLED_ShowString(0, 0, info_str, 1);
+
+    // 2. 中部：中日韩混合滚动歌名
+    UI_DrawMixedScrollTitle(12, g_playlist.current_filename, HAL_GetTick());
+
+    // 3. 底部：进度条 + 播放时间
+    OLED_DrawProgressBar(0, 28, 90, 4, 0); // 进度目前设为0，后续可根据时长计算
+
+    snprintf(info_str, sizeof(info_str), "%02lu:%02lu", elapsed / 60, elapsed % 60);
+    OLED_ShowString(95, 26, info_str, 1);
+
+    OLED_Update();
 }

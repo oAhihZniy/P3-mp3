@@ -1,8 +1,12 @@
 #ifndef OLED_APP_H
 #define OLED_APP_H
+
 #include <stdint.h>
 
-void UI_DrawScrollingTitle(uint8_t y, const char* str, uint32_t tick);
-static void UI_OLED_ShowScrollString(int16_t x, uint8_t y, char* str);
+// UI 核心任务
+void UI_Refresh_Task(void);
 
-#endif //OLED_APP_H
+// 混合文字滚动逻辑
+void UI_DrawMixedScrollTitle(uint8_t y, const char* str, uint32_t tick);
+
+#endif

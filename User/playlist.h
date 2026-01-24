@@ -19,7 +19,7 @@ FRESULT Playlist_GetFileName(uint16_t index, char* out_name); // 获取第 N 首
 void Playlist_Next(void);                // 下一曲
 void Playlist_Prev(void);                // 上一曲
 void Playlist_AutoNext_Task(void);       // 自动切歌检查逻辑
-
+void Playlist_PlayCurrent(void);// 播放当前索引的歌曲
 extern Playlist_t g_playlist;
 
 #endif
