@@ -11,15 +11,15 @@
 
 // 播放状态枚举
 typedef enum {
-    AUDIO_IDLE = 0,
-    AUDIO_PLAYING,
-    AUDIO_STOPPED,
-    AUDIO_ERROR
+    AUDIO_IDLE = 0,// 空闲
+    AUDIO_PLAYING,// 播放中
+    AUDIO_STOPPED,// 停止
+    AUDIO_ERROR// 错误
 } AudioStatus_t;
 
 // 外部调用接口
 void Audio_Init(void);
-FRESULT Audio_Play(const char* filename);   // 此时 FRESULT 就能被识别了
+FRESULT Audio_Play(const char* filename);
 void Audio_Stop(void);
 void Audio_Process(void);
 AudioStatus_t Audio_GetStatus(void);

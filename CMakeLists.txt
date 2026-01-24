@@ -41,7 +41,10 @@ add_executable(${CMAKE_PROJECT_NAME}
         User/audio_driver.c
         User/audio_driver.h
         Core/Src/app_task.c
-        Core/Inc/app_task.h)
+        Core/Inc/app_task.h
+        User/oled_driver.c
+        User/oled_driver.h
+        User/oled_font.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
