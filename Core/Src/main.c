@@ -112,7 +112,7 @@ int main(void)
   OLED_Clear();
   OLED_ShowString(0, 0, "P3 MP3 STARTING", 1);
   OLED_Update();
-
+  // OLED_DrawFilledRect(1, 1, 20, 40, 1);
   // 2. 挂载 SD 卡
   res = f_mount(&fs, "0:/", 1);
   if (res != FR_OK) {
