@@ -17,10 +17,31 @@ static uint8_t font_init_done = 0;
 // };
 
 // SSD1306 初始化序列
+// static const uint8_t init_cmds[] = {
+//     0xAE, 0x20, 0x10, 0xB0, 0xC8, 0x00, 0x10, 0x40, 0x81, 0xDF,
+//     0xA1, 0xA6, 0xA8, 0x3F, 0xA4, 0xD3, 0x00, 0xD5, 0xF0,
+//     0xD9, 0x22, 0xDA, 0x12, 0xDB, 0x20, 0x8D, 0x14, 0xAF
+// };
+
 static const uint8_t init_cmds[] = {
-    0xAE, 0x20, 0x10, 0xB0, 0xC8, 0x00, 0x10, 0x40, 0x81, 0xDF,
-    0xA1, 0xA6, 0xA8, 0x3F, 0xA4, 0xD3, 0x00, 0xD5, 0xF0,
-    0xD9, 0x22, 0xDA, 0x12, 0xDB, 0x20, 0x8D, 0x14, 0xAF
+    0xAE,       // 关闭显示
+    0x20, 0x00, // 核心：必须是 0x00 (水平寻址) 才能适配你的全屏 DMA 刷新
+    0xB0,       // 起始页
+    0xC8,       // 翻转 COM
+    0x00, 0x10, // 列地址设置
+    0x40,       // 起始行
+    0x81, 0xDF, // 对比度
+    0xA1,       // 左右反转
+    0xA6,       // 正常显示
+    0xA8, 0x3F, // 核心：64行 (0.96寸专用)
+    0xA4,       // 全屏显示
+    0xD3, 0x00, // 偏移
+    0xD5, 0xF0, // 频率
+    0xD9, 0x22, // 充电周期
+    0xDA, 0x12, // 核心：Alternative COM (0.96寸专用)
+    0xDB, 0x20, // VCOMH
+    0x8D, 0x14, // 开启电荷泵
+    0xAF        // 开启显示
 };
 
 static void OLED_WriteCmd(uint8_t cmd) {
@@ -36,15 +57,19 @@ void OLED_Init(void) {
     OLED_Update();
 }
 
+
 void OLED_Update(void) {
     if (oled_ready) {
         oled_ready = 0;
-        HAL_I2C_Mem_Write_DMA(&hi2c1, OLED_ADDR, 0x40, I2C_MEMADD_SIZE_8BIT, OLED_Buffer, OLED_BUFFER_SIZE);
+        if (HAL_I2C_Mem_Write_DMA(&hi2c1, OLED_ADDR, 0x40, I2C_MEMADD_SIZE_8BIT, OLED_Buffer, OLED_BUFFER_SIZE) != HAL_OK) {
+            oled_ready = 1; // 如果启动失败，立即重置标志位
+        }
     }
 }
-
 void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c) {
-    if (hi2c->Instance == I2C1) oled_ready = 1;
+    if (hi2c->Instance == I2C1) {
+        oled_ready = 1;
+    }
 }
 
 void OLED_Clear(void) { memset(OLED_Buffer, 0, OLED_BUFFER_SIZE); }

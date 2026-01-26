@@ -107,65 +107,31 @@ int main(void)
   MX_FATFS_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-  // 1. 初始化 OLED 屏幕
   OLED_Init();
   OLED_Clear();
-  OLED_ShowString(0, 0, "P3 MP3 STARTING", 1);
+  OLED_ShowString(30, 24, "PERSONA 3", 1);
   OLED_Update();
-  // OLED_DrawFilledRect(1, 1, 20, 40, 1);
-  // 2. 挂载 SD 卡
-  res = f_mount(&fs, "0:/", 1);
-  if (res != FR_OK) {
-    OLED_Clear();
-    OLED_ShowString(0, 0, "SD MOUNT ERROR", 1);
-    char err_buf[16];
-    sprintf(err_buf, "CODE: %d", res);
-    OLED_ShowString(0, 16, err_buf, 1);
-    OLED_Update();
-    while(1); // 挂载失败则停机，检查硬件
-  }
-
-  // 3. 初始化字库 (SD卡挂载后才能执行)
-  if (OLED_FontInit("0:/FONT.BIN") != FR_OK) {
-    // 如果没有字库，虽然能播歌但不能显示中日文
-    OLED_ShowString(0, 16, "FONT NOT FOUND", 1);
-    OLED_Update();
-    HAL_Delay(1000);
-  }
-
-  // 4. 初始化音频解码器和播放列表
-  Audio_Init();
-  if (Playlist_Init() == FR_OK && g_playlist.total_count > 0) {
-    // 成功搜到歌曲，开始播放第一首
-    Playlist_PlayCurrent();
-  } else {
-    OLED_Clear();
-    OLED_ShowString(0, 0, "NO MP3 FILES!", 1);
-    OLED_Update();
-  }
+  HAL_Delay(1000);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    // --- 任务 1: 音频解码 (最高优先级) ---
-    // 这个函数必须在主循环中以最快速度被轮询
-    Audio_Process();
+   // --- 诊断 1: LED 心跳 ---
+        // 如果 PC13 的 LED 不闪烁，说明时钟配置 SystemClock_Config() 卡死了
+        static uint32_t led_tick = 0;
+    if (HAL_GetTick() - led_tick >= 500) {
+      led_tick = HAL_GetTick();
+      HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+    }
 
-    // --- 任务 2: 自动切歌检查 ---
-    // 检查当前歌曲是否自然结束，若是则切换下一首
-    Playlist_AutoNext_Task();
-
-    // --- 任务 3: 按键处理 (非阻塞) ---
-    // 每 20ms 扫描一次按键，内部已处理消抖
-    App_Task_Keyboard();
-
-    // --- 任务 4: UI 界面刷新 (非阻塞) ---
-    // 约 33 FPS (30ms 刷新一次)，保证滚动歌名丝滑
-    if (HAL_GetTick() - ui_timer >= 30) {
-      ui_timer = HAL_GetTick();
-      UI_Refresh_Task(); // 内部会调用 OLED_Update()
+    // --- 诊断 2: UI 刷新 ---
+    // 约 30ms 刷新一次
+    static uint32_t ui_tick = 0;
+    if (HAL_GetTick() - ui_tick >= 30) {
+      ui_tick = HAL_GetTick();
+      UI_Test_Task(); // 调用上面写的模拟函数
     }
     /* USER CODE END WHILE */
 
