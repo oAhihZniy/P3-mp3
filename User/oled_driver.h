@@ -7,7 +7,7 @@
 // 屏幕参数
 #define OLED_WIDTH   128
 #define OLED_HEIGHT  64
-#define OLED_BUFFER_SIZE 512
+#define OLED_BUFFER_SIZE 1024
 #define OLED_ADDR    0x78
 
 // 字库参数
