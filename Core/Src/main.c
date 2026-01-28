@@ -58,7 +58,9 @@
 /* USER CODE BEGIN PV */
 FATFS fs;                 // FatFs 文件系统对象
 FRESULT res;              // 文件操作结果
-uint32_t ui_timer = 0;    // UI 刷新计时器
+uint32_t ui_timer = 0;
+DIR dir;           // 目录对象
+FILINFO fno; // UI 刷新计时器
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -124,16 +126,13 @@ int main(void)
   }
   OLED_ShowString(50, 0, "E", 1);
 
-
   uint8_t test_buf[512];
   memset(test_buf, 0, 512); // 清空，防止旧数据干扰
-
   // 调用驱动读第 0 扇区
   if (SD_ReadDisk(test_buf, 0, 1) == 0) {
     // 验证 MBR 标志位 0x55 0xAA
     if (test_buf[510] == 0x55 && test_buf[511] == 0xAA) {
       OLED_ShowString(68, 0, "VE:OK", 1);
-
     } else {
       OLED_ShowString(68, 0, "VE:ERR", 1);
     }
@@ -143,32 +142,33 @@ int main(void)
   OLED_ShowString(42, 0, "T", 1);
 
   //fatfs测试
-  res = f_mount(&fs, "0:/", 1);
+  res = f_mount(&fs, "0:", 1);
 
   if (res == FR_OK) {
-    OLED_ShowString(0, 16, "MOUNT: SUCCESS!", 1);
-    OLED_Update();
+    OLED_ShowString(0, 16, "MOUNT REGISTERED", 1);
 
-    // 2. 尝试打开字库文件验证文件夹寻址
-    // 假设你的路径是 "0:/font.bin"
-    if (OLED_FontInit("0:/font.bin") == FR_OK) {
-      OLED_ShowString(0, 32, "FONT: OPEN OK!", 1);
+    // 修正点 2：打开目录时使用 "/" 或 "0:/"
+    res = f_opendir(&dir, "/");
 
-      // (我是牢理) 3. 终极验证：画个中文看看
-      // 画一个 Unicode 0x4E2D (中)
-      OLED_DrawCJKChar(0, 48, 0x4E2D);
-      OLED_ShowString(20, 48, "READING OK", 1);
-    } else {
-      // 如果这里报错，检查文件名大小写，或者 LFN 开启了没
-      char err_f[20];
-      sprintf(err_f, "FONT ERR: %d", res);
-      OLED_ShowString(0, 32, err_f, 1);
+    if (res == FR_OK) {
+      OLED_ShowString(0, 32, "REAL SUCCESS!", 1);
+      // 读取第一个文件名
+      if (f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0) {
+        OLED_ShowString(0, 48, fno.fname, 1);
+      }
+      f_closedir(&dir);
+    }
+    else {
+      char err_msg[32];
+      // 如果这里报 13，说明驱动通了但卡格式不对
+      // 如果这里报 1，说明底层读数据依然有错
+      sprintf(err_msg, "OPENDIR ERR: %d", res);
+      OLED_ShowString(0, 32, err_msg, 1);
     }
   } else {
-    // 报错 13: 格式不对； 报错 1: 驱动层读失败
-    char err_m[20];
-    sprintf(err_m, "MOUNT ERR: %d", res);
-    OLED_ShowString(0, 16, err_m, 1);
+    char err_msg[32];
+    sprintf(err_msg, "MOUNT ERR: %d", res); // 这里的报错才是真实的
+    OLED_ShowString(0, 16, err_msg, 1);
   }
 
   OLED_Update();
