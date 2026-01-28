@@ -99,7 +99,7 @@ DSTATUS USER_status (
 {
   /* USER CODE BEGIN STATUS */
   // 这里简单处理，默认返回 OK 即可，或者通过 GPIO 读取 PB3 (SD_DET)
-  if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3) == GPIO_PIN_SET) return STA_NODISK;
+  // if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3) == GPIO_PIN_SET) return STA_NODISK;
   return 0;
   /* USER CODE END STATUS */
 }
