@@ -109,9 +109,20 @@ int main(void)
   /* USER CODE BEGIN 2 */
   OLED_Init();
   OLED_Clear();
-  OLED_ShowString(30, 24, "PERSONA 3", 1);
+  // (我是牢理) 1. 物理层初始化
+  uint8_t sd_status = SD_Init();
+  if (sd_status == 0) {
+    OLED_ShowString(0, 0, "SD Hardware: OK", 1);
+  } else {
+    char fail_msg[32];
+    // 打印具体的错误号，这非常关键！
+    sprintf(fail_msg, "SD FAIL CODE: %d", sd_status);
+    OLED_ShowString(0, 0, fail_msg, 1);
+  }
   OLED_Update();
-  HAL_Delay(1000);
+
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -120,19 +131,19 @@ int main(void)
   {
    // --- 诊断 1: LED 心跳 ---
         // 如果 PC13 的 LED 不闪烁，说明时钟配置 SystemClock_Config() 卡死了
-        static uint32_t led_tick = 0;
-    if (HAL_GetTick() - led_tick >= 500) {
-      led_tick = HAL_GetTick();
-      HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-    }
+    //     static uint32_t led_tick = 0;
+    // if (HAL_GetTick() - led_tick >= 500) {
+    //   led_tick = HAL_GetTick();
+
+    // }
 
     // --- 诊断 2: UI 刷新 ---
     // 约 30ms 刷新一次
-    static uint32_t ui_tick = 0;
-    if (HAL_GetTick() - ui_tick >= 30) {
-      ui_tick = HAL_GetTick();
-      UI_Test_Task(); // 调用上面写的模拟函数
-    }
+    // static uint32_t ui_tick = 0;
+    // if (HAL_GetTick() - ui_tick >= 30) {
+    //   ui_tick = HAL_GetTick();
+    //   UI_Test_Task(); // 调用上面写的模拟函数
+    // }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

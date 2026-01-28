@@ -3,7 +3,7 @@
 #include "i2c.h"
 #include <string.h>
 
-uint8_t OLED_Buffer[OLED_BUFFER_SIZE];
+uint8_t OLED_Buffer[OLED_BUFFER_SIZE];// OLED 显存缓冲区
 volatile uint8_t oled_ready = 1;
 
 static FIL fontFile;           // 唯一的字库句柄
@@ -44,6 +44,7 @@ static const uint8_t init_cmds[] = {
     0xAF        // 开启显示
 };
 
+// 发送命令
 static void OLED_WriteCmd(uint8_t cmd) {
     HAL_I2C_Mem_Write(&hi2c1, OLED_ADDR, 0x00, I2C_MEMADD_SIZE_8BIT, &cmd, 1, 10);
 }
@@ -57,7 +58,7 @@ void OLED_Init(void) {
     OLED_Update();
 }
 
-
+// 使用 DMA 异步更新屏幕
 void OLED_Update(void) {
     if (oled_ready) {
         oled_ready = 0;
@@ -66,30 +67,37 @@ void OLED_Update(void) {
         }
     }
 }
+
+// I2C DMA 传输完成回调
 void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c) {
     if (hi2c->Instance == I2C1) {
         oled_ready = 1;
     }
 }
 
+// 清屏
 void OLED_Clear(void) { memset(OLED_Buffer, 0, OLED_BUFFER_SIZE); }
 
+// 画点
 void OLED_DrawPoint(uint8_t x, uint8_t y, uint8_t color) {
     if(x >= OLED_WIDTH || y >= OLED_HEIGHT) return;
     if(color) OLED_Buffer[x + (y / 8) * OLED_WIDTH] |= (1 << (y % 8));
     else OLED_Buffer[x + (y / 8) * OLED_WIDTH] &= ~(1 << (y % 8));
 }
 
+// 画矩形
 void OLED_DrawRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color) {
     for (uint8_t i = x; i < x + w; i++) { OLED_DrawPoint(i, y, color); OLED_DrawPoint(i, y + h - 1, color); }
     for (uint8_t i = y; i < y + h; i++) { OLED_DrawPoint(x, i, color); OLED_DrawPoint(x + w - 1, i, color); }
 }
 
+// 画实心矩形
 void OLED_DrawFilledRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color) {
     for (uint8_t i = x; i < x + w; i++)
         for (uint8_t j = y; j < y + h; j++) OLED_DrawPoint(i, j, color);
 }
 
+// 画进度条
 void OLED_DrawProgressBar(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t percent) {
     if (percent > 100) percent = 100;
     OLED_DrawRect(x, y, w, h, 1);
@@ -97,6 +105,7 @@ void OLED_DrawProgressBar(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t pe
     if (fill_w > 0) OLED_DrawFilledRect(x + 2, y + 2, fill_w, h - 4, 1);
 }
 
+// 显示单个字符 (8x16)
 void OLED_ShowChar(int16_t x, int16_t y, char chr, uint8_t color) {
     if (x <= -8 || x >= 128) return;
     uint8_t c = chr - ' ';
@@ -108,16 +117,19 @@ void OLED_ShowChar(int16_t x, int16_t y, char chr, uint8_t color) {
     }
 }
 
+// 显示字符串
 void OLED_ShowString(uint8_t x, uint8_t y, char *str, uint8_t color) {
     while (*str) { OLED_ShowChar(x, y, *str, color); x += 8; str++; }
 }
 
+// 初始化字库
 FRESULT OLED_FontInit(const char* path) {
     FRESULT res = f_open(&fontFile, path, FA_READ);
     if (res == FR_OK) font_init_done = 1;
     return res;
 }
 
+// 显示中日文字 (16x16)
 void OLED_DrawCJKChar(int16_t x, int16_t y, uint32_t unicode) {
     if (!font_init_done || x <= -16 || x >= 128) return;
     uint8_t glyph[32];
@@ -133,7 +145,8 @@ void OLED_DrawCJKChar(int16_t x, int16_t y, uint32_t unicode) {
     }
 }
 
+// 画线 (简单实现，仅支持水平线占位)
 void OLED_DrawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color) {
-    // 这里可以使用简单的 Bresenham 算法，或者暂时留空防止报错
+
     for (uint8_t i = x1; i <= x2; i++) OLED_DrawPoint(i, y1, color); // 简单的水平线占位
 }

@@ -22,24 +22,33 @@ void SD_SPI_SpeedHigh(void) {
 // 3. 等待 SD 卡准备就绪
 uint8_t SD_WaitReady(void) {
     uint32_t t = 0;
+    // 等待 MISO 变高（0xFF），代表卡闲置
     do {
         if (SPI_ReadWriteByte(0xFF) == 0xFF) return 0;
         t++;
-    } while (t < 0xFFFFFF); // 超时等待
+    } while (t < 0x5000); // 400kHz 下这个时间足够了
     return 1;
 }
 
 // 4. 发送命令
 uint8_t SD_SendCmd(uint8_t cmd, uint32_t arg, uint8_t crc) {
     uint8_t res;
+    uint8_t retry = 0;
+
+    // 1. 确保释放总线并多给 8 个时钟，让卡完成上一指令
     SD_CS_HIGH();
-    SPI_ReadWriteByte(0xFF); // 产生额外时钟
+    SPI_ReadWriteByte(0xFF);
+
+    // 2. 选中卡
     SD_CS_LOW();
 
-    // 等待卡准备好
-    if (SD_WaitReady()) return 0xFF;
+    // 3. 等待卡准备好 (MISO 应该为高)
+    if (SD_WaitReady()) {
+        SD_CS_HIGH();
+        return 0xFF;
+    }
 
-    // 发送 6 字节命令包
+    // 4. 发送命令包
     SPI_ReadWriteByte(cmd | 0x40);
     SPI_ReadWriteByte(arg >> 24);
     SPI_ReadWriteByte(arg >> 16);
@@ -47,12 +56,15 @@ uint8_t SD_SendCmd(uint8_t cmd, uint32_t arg, uint8_t crc) {
     SPI_ReadWriteByte(arg);
     SPI_ReadWriteByte(crc);
 
-    // 等待响应
-    uint8_t retry = 0;
+    // 5. 特别处理：CMD12 停止指令后需要跳过一个字节
+    if (cmd == CMD12) SPI_ReadWriteByte(0xFF);
+
+    // 6. 等待 R1 响应 (最高位必须为 0)
     do {
         res = SPI_ReadWriteByte(0xFF);
     } while ((res & 0x80) && retry++ < 0XFE);
 
+    // 注意：这里先不要释放 CS，让调用者决定何时释放（因为读数据需要持续拉低 CS）
     return res;
 }
 
@@ -61,34 +73,47 @@ uint8_t SD_Init(void) {
     uint8_t res, i;
     uint8_t buf[4];
 
-    // A. 低速模式 (400kHz 以下): 修改 SPI1 分频为 256
+    // A. 强制低速
     hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
     HAL_SPI_Init(&hspi1);
 
+    // B. 必须在 CS 为高电平时发送至少 74 个时钟脉冲
     SD_CS_HIGH();
-    // 发送至少 74 个脉冲让卡进入工作状态
-    for (i = 0; i < 10; i++) SPI_ReadWriteByte(0xFF);
+    for (i = 0; i < 15; i++) SPI_ReadWriteByte(0xFF);
 
-    // CMD0: 复位进入 Idle 状态
+    // C. 发送 CMD0
     res = SD_SendCmd(CMD0, 0, 0x95);
-    if (res != 0x01) return 1;
+    if (res != 0x01) return 10; // 如果返回 255，说明 MISO 一直是高，卡没反应
 
-    // CMD8: 检查是否为 SD2.0 卡
+    // D. 发送 CMD8
     res = SD_SendCmd(CMD8, 0x1AA, 0x87);
-    if (res == 0x01) { // SD2.0
-        for (i = 0; i < 4; i++) buf[i] = SPI_ReadWriteByte(0xFF);
-        // 循环发送 ACMD41 激活卡
-        uint32_t retry = 0xFFFF;
-        do {
-            SD_SendCmd(CMD55, 0, 0x01);
-            res = SD_SendCmd(CMD41, 0x40000000, 0x01);
-        } while (res != 0x00 && retry--);
+    if (res != 0x01) return 20;// 不是 SD2.0 卡
 
-        // 初始化成功后提速
-        SD_SPI_SpeedHigh();
-    }
+    for (i = 0; i < 4; i++) buf[i] = SPI_ReadWriteByte(0xFF);
+
+    // E. 激活卡 (ACMD41)
+    uint32_t retry = 2000;
+    do {
+        // 先发送 CMD55，必须返回 0x01
+        res = SD_SendCmd(CMD55, 0, 0x01);
+        SD_CS_HIGH(); // 释放一下 CS
+        SPI_ReadWriteByte(0xFF); // 提供 8 个时钟
+
+        if (res <= 0x01) { // 如果 CMD55 响应正常
+            // 再发送 CMD41
+            res = SD_SendCmd(CMD41, 0x40000000, 0x01);
+            SD_CS_HIGH(); // 释放 CS
+            SPI_ReadWriteByte(0xFF);
+        }
+        HAL_Delay(1);
+    } while (res != 0x00 && retry--);
+
+    if (res != 0x00) return 30; // 依然超时返回 30
+
+    // F. 初始化成功后提速
+    SD_SPI_SpeedHigh();
     SD_CS_HIGH();
-    return (res == 0) ? 0 : 1;
+    return 0;
 }
 
 // 6. DMA 读取块 (大幅提升 MP3 读取性能)
