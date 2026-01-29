@@ -32,7 +32,6 @@ void OLED_ShowString(uint8_t x, uint8_t y, char *str, uint8_t color);// 显示�
 // 4. 字库接口 (SD 卡里的中日文)
 FRESULT OLED_FontInit(const char* path);// 初始化字库
 void OLED_DrawCJKChar(int16_t x, int16_t y, uint32_t unicode);// 显示中日文字
-void UI_Debug_Print_Name(const char* name);
 void OLED_ShowSDString(uint8_t x, uint8_t y, const char* str);
 
 

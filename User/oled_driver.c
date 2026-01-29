@@ -155,40 +155,84 @@ void OLED_DrawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color
 
 
 // (我是牢理) 强健的 UTF-8 混合显示函数
+// void OLED_ShowSDString(uint8_t x, uint8_t y, const char* str) {
+//     const uint8_t* p = (const uint8_t*)str;
+//     uint32_t unicode = 0;
+//     uint8_t utf_bytes = 0;
+//
+//     while (*p) {
+//         if ((*p & 0x80) == 0) {
+//             // 1字节 ASCII (0xxxxxxx)
+//             OLED_ShowChar(x, y, *p, 1);
+//             x += 8;
+//             p++;
+//         }
+//         else if ((*p & 0xE0) == 0xC0) {
+//             // 2字节 字符 (通常是希腊字母、特殊符号)
+//             unicode = ((*p & 0x1F) << 6) | (*(p + 1) & 0x3F);
+//             OLED_DrawCJKChar(x, y, unicode);
+//             x += 16;
+//             p += 2;
+//         }
+//         else if ((*p & 0xF0) == 0xE0) {
+//             // 3字节 中日韩汉字 (1110xxxx 10xxxxxx 10xxxxxx)
+//             unicode = ((uint32_t)(p[0] & 0x0F) << 12) |
+//                       ((uint32_t)(p[1] & 0x3F) << 6) |
+//                       ((uint32_t)(p[2] & 0x3F));
+//             OLED_DrawCJKChar(x, y, unicode);
+//             x += 16;
+//             p += 3;
+//         }
+//         else {
+//             p++; // 忽略更高字节或其他错误
+//         }
+//
+//         if (x > 120) break; // 屏幕边界保护
+//     }
+// }
+
+// (我是牢理) 关键声明：调用 FatFs 内部的转码函数
+// dir = 1 代表从 OEM(GBK) 转 Unicode
+extern WCHAR ff_convert (WCHAR src, UINT dir);
+
+/**
+ * (我是牢理) 针对 GBK 编码优化的中文显示函数
+ * 逻辑：识别 GBK 双字节 -> 转为 Unicode -> 查 SD 卡字库
+ */
 void OLED_ShowSDString(uint8_t x, uint8_t y, const char* str) {
-    const uint8_t* p = (const uint8_t*)str;
-    uint32_t unicode = 0;
-    uint8_t utf_bytes = 0;
+    uint8_t* p = (uint8_t*)str;
+    uint32_t unicode_code;
 
     while (*p) {
-        if ((*p & 0x80) == 0) {
-            // 1字节 ASCII (0xxxxxxx)
-            OLED_ShowChar(x, y, *p, 1);
+        if (*p < 0x80) {
+            // --- 1. 处理标准 ASCII (英文/数字) ---
+            OLED_ShowChar(x, y, (char)*p, 1);
             x += 8;
             p++;
         }
-        else if ((*p & 0xE0) == 0xC0) {
-            // 2字节 字符 (通常是希腊字母、特殊符号)
-            unicode = ((*p & 0x1F) << 6) | (*(p + 1) & 0x3F);
-            OLED_DrawCJKChar(x, y, unicode);
-            x += 16;
-            p += 2;
-        }
-        else if ((*p & 0xF0) == 0xE0) {
-            // 3字节 中日韩汉字 (1110xxxx 10xxxxxx 10xxxxxx)
-            unicode = ((uint32_t)(p[0] & 0x0F) << 12) |
-                      ((uint32_t)(p[1] & 0x3F) << 6) |
-                      ((uint32_t)(p[2] & 0x3F));
-            OLED_DrawCJKChar(x, y, unicode);
-            x += 16;
-            p += 3;
-        }
         else {
-            p++; // 忽略更高字节或其他错误
+            // --- 2. 处理 GBK 中文 (双字节) ---
+            // 将两个字节拼成一个 16 位的 GBK 码
+            // 注意：GBK 是大端序，第一个字节在高位
+            uint16_t gbk_val = (*p << 8) | *(p + 1);
+
+            // 使用 FatFs 内部表进行转码
+            // 比如：ff_convert(0xD6D0, 1) 会返回 0x4E2D
+            unicode_code = ff_convert(gbk_val, 1);
+
+            // 如果转码成功（不为 0），则去 SD 卡读字库
+            if (unicode_code != 0) {
+                OLED_DrawCJKChar(x, y, unicode_code);
+            } else {
+                // 如果转码失败，画个空心框占位
+                OLED_DrawRect(x, y, 16, 16, 1);
+            }
+
+            x += 16;
+            p += 2; // 跳过处理过的两个字节
         }
 
-        if (x > 120) break; // 屏幕边界保护
+        // 边界检查：防止一行显示太多导致溢出
+        if (x > 120) break;
     }
 }
-
-// (我是牢理) 专门显示 FatFs WCHAR 文件名的函数

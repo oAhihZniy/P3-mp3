@@ -56,10 +56,14 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-FATFS fs;                 // FatFs全局文件系统对象
-FRESULT res;              // 定义FatFs返回值类型
-uint32_t ui_timer = 0;    // UI刷新计数器
-uint32_t key_timer = 0;   // 按键扫描计数器
+FATFS fs;                 // 全局文件系统对象
+FRESULT res;              // 返回值
+uint32_t ui_timer = 0;    // UI刷新计时器
+uint32_t key_timer = 0;   // 按键扫描计时器
+
+// 诊断用
+DIR dir;
+FILINFO fno;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -109,57 +113,76 @@ int main(void)
   MX_FATFS_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-  // 1. OLED 基础点亮 (我是牢理提醒：先点亮屏幕才能看调试信息)
-  SD_Init();
+
+  // --- 2. 屏幕初步点亮 ---
   OLED_Init();
   OLED_Clear();
-  OLED_ShowString(0, 0, "PERSONA 3 MP3", 1);
+  OLED_ShowString(0, 0, "P3 MP3 RECOVERY", 1); // 牢理提醒：显示回滚成功
   OLED_Update();
-  HAL_Delay(500);
-  // 2. SD卡物理层初始化
+
+  // --- 3. SD卡物理初始化 ---
   if (SD_Init() == 0) {
-  OLED_ShowString(0, 16, "SD HARDWARE: OK", 1);
+    OLED_ShowString(0, 16, "SD PHYS: OK", 1);
   } else {
-  OLED_ShowString(0, 16, "SD HARDWARE: FAIL", 1);
-  OLED_Update();
-  while(1); // 物理层不通，检查接线和供电
-  }
-  // OLED_Update();
-  //
-  // // 3. 挂载文件系统 (我是牢理提醒：路径用"0:"，立即挂载)
-  res = f_mount(&fs, "0:", 1);
-  if (res == FR_OK) {
-  OLED_ShowString(0, 32, "MOUNT SUCCESS!", 1);
-  } else {
-  char err_msg[32];
-  sprintf(err_msg, "MOUNT ERR: %d", res);
-  OLED_ShowString(0, 32, err_msg, 1);
-  OLED_Update();
-  while(1);
+    OLED_ShowString(0, 16, "SD PHYS: FAIL", 1);
+    OLED_Update();
+    while(1);
   }
   OLED_Update();
 
-  // 4. 初始化字库 (我是牢理提醒：现在文件在根目录，路径为"0:/FONT.fon")
-  res = OLED_FontInit("0:SYSTEM/font.bin");
+  // --- 4. 挂载文件系统 (LFN_UNICODE=0, 路径不加 L) ---
+  res = f_mount(&fs, "0:", 1);
   if (res == FR_OK) {
-  OLED_ShowString(0, 48, "FONT LOADED!", 1);
-  // 终极验证：画一个汉字
-  OLED_DrawCJKChar(100, 48, 0x4E2D); // Unicode "中"
+    OLED_ShowString(0, 32, "MOUNT: SUCCESS", 1);
   } else {
-  char err_msg[32];
-  sprintf(err_msg, "FONT OPEN ERR: %d", res);
-  OLED_ShowString(0, 48, err_msg, 1);
+    char err_msg[32];
+    sprintf(err_msg, "MOUNT ERR: %d", res);
+    OLED_ShowString(0, 32, err_msg, 1);
+    OLED_Update();
+    while(1);
   }
+  OLED_Update();
+
+  // --- 5. 初始化字库 ---
+  // (我是牢理) 此时路径是普通字符串
+  res = OLED_FontInit("0:/SYSTEM/font.bin");
+  if (res == FR_OK) {
+    OLED_ShowString(0, 48, "FONT LOADED", 1);
+  } else {
+    char err_msg[32];
+    sprintf(err_msg, "FONT ERR: %d", res);
+    OLED_ShowString(0, 48, err_msg, 1);
+  }
+  OLED_Update();
   HAL_Delay(1000);
-  Debug_Scan_All_Files();
-  HAL_Delay(1000); // 停顿一秒看清所有 OK
+
+  // --- 6. 编码诊断：查看第一个文件的原始字节 ---
+ if (f_opendir(&dir, "/") == FR_OK) {
+    uint8_t file_count = 0;
+    while (f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0) {
+        file_count++;
+        if (file_count == 5) {  // 找到第 2 个文件
+            uint8_t* p = (uint8_t*)fno.fname;
+            char hex_buf[32];
+            OLED_Clear();
+            OLED_ShowString(0, 0, "ENCODING DEBUG:", 1);
+            sprintf(hex_buf, "%02X %02X %02X %02X", p[0], p[1], p[2], p[3]);
+            OLED_ShowString(0, 16, hex_buf, 1);
+            OLED_ShowSDString(0, 32, fno.fname);
+            OLED_Update();
+            HAL_Delay(3000);
+            break; // 找到后退出循环
+        }
+    }
+    f_closedir(&dir);
+  }
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-
+  while (1) {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
