@@ -36,6 +36,7 @@
 #include "app_task.h"
 #include <stdio.h>
 #include <string.h>
+#include <tgmath.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -56,14 +57,10 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-FATFS fs;                 // 全局文件系统对象
-FRESULT res;              // 返回值
-uint32_t ui_timer = 0;    // UI刷新计时器
-uint32_t key_timer = 0;   // 按键扫描计时器
-
-// 诊断用
-DIR dir;
-FILINFO fno;
+FATFS fs;                 // 全局文件系统对象（必须放全局，防止栈溢出）
+FRESULT res;              // FatFs返回值
+uint32_t ui_timer = 0;    // UI刷新计时
+uint32_t key_timer = 0;   // 按键扫描计时
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -113,68 +110,64 @@ int main(void)
   MX_FATFS_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-
-  // --- 2. 屏幕初步点亮 ---
+  // --- 2. 视觉系统启动 ---
   OLED_Init();
   OLED_Clear();
-  OLED_ShowString(0, 0, "P3 MP3 RECOVERY", 1); // 牢理提醒：显示回滚成功
+  OLED_ShowString(0, 0, "PERSONA 3 MP3", 1);
+  OLED_ShowString(0, 16, "INITIALIZING...", 1);
   OLED_Update();
 
-  // --- 3. SD卡物理初始化 ---
+  // --- 3. 存储系统启动 ---
   if (SD_Init() == 0) {
-    OLED_ShowString(0, 16, "SD PHYS: OK", 1);
+    OLED_ShowString(0, 32, "SD PHYS: OK", 1);
   } else {
-    OLED_ShowString(0, 16, "SD PHYS: FAIL", 1);
+    OLED_ShowString(0, 32, "SD PHYS: FAIL", 1);
     OLED_Update();
-    while(1);
+    while(1); // 物理层不通，检查杜邦线
   }
   OLED_Update();
 
-  // --- 4. 挂载文件系统 (LFN_UNICODE=0, 路径不加 L) ---
+  // --- 4. 挂载文件系统 (LFN_UNICODE=0 模式) ---
   res = f_mount(&fs, "0:", 1);
   if (res == FR_OK) {
-    OLED_ShowString(0, 32, "MOUNT: SUCCESS", 1);
+    OLED_ShowString(0, 48, "FS MOUNT: OK", 1);
   } else {
     char err_msg[32];
     sprintf(err_msg, "MOUNT ERR: %d", res);
-    OLED_ShowString(0, 32, err_msg, 1);
+    OLED_ShowString(0, 48, err_msg, 1);
     OLED_Update();
     while(1);
   }
   OLED_Update();
+  HAL_Delay(500);
 
-  // --- 5. 初始化字库 ---
-  // (我是牢理) 此时路径是普通字符串
-  res = OLED_FontInit("0:/SYSTEM/font.bin");
-  if (res == FR_OK) {
-    OLED_ShowString(0, 48, "FONT LOADED", 1);
+  // --- 5. 加载字库文件 ---
+  // (我是牢理提醒) 确保SD卡 SYSTEM 目录下有 FONT.fon
+  if (OLED_FontInit("0:/SYSTEM/font.bin") == FR_OK) {
+    OLED_Clear();
+    OLED_ShowString(0, 0, "FONT LOADED", 1);
+    // 验证字库：画一个“中”
+    OLED_ShowSDString(100, 0, "中");
   } else {
-    char err_msg[32];
-    sprintf(err_msg, "FONT ERR: %d", res);
-    OLED_ShowString(0, 48, err_msg, 1);
+    OLED_Clear();
+    OLED_ShowString(0, 0, "FONT MISSING!", 1);
   }
   OLED_Update();
-  HAL_Delay(1000);
 
-  // --- 6. 编码诊断：查看第一个文件的原始字节 ---
- if (f_opendir(&dir, "/") == FR_OK) {
-    uint8_t file_count = 0;
-    while (f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0) {
-        file_count++;
-        if (file_count == 5) {  // 找到第 2 个文件
-            uint8_t* p = (uint8_t*)fno.fname;
-            char hex_buf[32];
-            OLED_Clear();
-            OLED_ShowString(0, 0, "ENCODING DEBUG:", 1);
-            sprintf(hex_buf, "%02X %02X %02X %02X", p[0], p[1], p[2], p[3]);
-            OLED_ShowString(0, 16, hex_buf, 1);
-            OLED_ShowSDString(0, 32, fno.fname);
-            OLED_Update();
-            HAL_Delay(3000);
-            break; // 找到后退出循环
-        }
-    }
-    f_closedir(&dir);
+  // --- 6. 音频引擎与播放列表点火 ---
+  Audio_Init(); // 初始化Helix解码器
+  if (Playlist_Init() == FR_OK && g_playlist.total_count > 0) {
+    char info[32];
+    sprintf(info, "FOUND %d SONGS", g_playlist.total_count);
+    OLED_ShowString(0, 16, info, 1);
+    OLED_Update();
+    HAL_Delay(1000);
+
+    // (我是牢理) 正式点火：播放第一首 MP3
+    Playlist_PlayCurrent();
+  } else {
+    OLED_ShowString(0, 16, "NO MP3 FOUND", 1);
+    OLED_Update();
   }
 
 
@@ -183,6 +176,26 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
+
+    // (我是牢理) 任务 1: 音频解码 (极高优先级)
+    // 这个函数会处理双缓冲填充，必须尽可能频繁地调用
+    Audio_Process();
+
+    // (我是牢理) 任务 2: 逻辑控制 (自动切歌)
+    Playlist_AutoNext_Task();
+
+    // (我是牢理) 任务 3: 按键交互 (每20ms一次)
+    if (HAL_GetTick() - key_timer >= 20) {
+      key_timer = HAL_GetTick();
+      App_Task_Keyboard();
+    }
+
+    // (我是牢理) 任务 4: UI表现 (每30ms一次)
+    // 负责平滑滚动歌名和进度条更新
+    if (HAL_GetTick() - ui_timer >= 30) {
+      ui_timer = HAL_GetTick();
+      UI_Refresh_Task(); // 内部包含 OLED_Update()
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

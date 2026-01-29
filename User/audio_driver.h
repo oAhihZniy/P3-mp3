@@ -7,8 +7,8 @@
 
 // 音频缓冲区配置
 #define AUDIO_BUF_SIZE    16384  // 16KB 总缓冲
-#define MP3_IN_BUF_SIZE   4096
-
+#define MP3_IN_BUF_SIZE   8192
+extern uint16_t AudioBuffer[AUDIO_BUF_SIZE / 2];
 // 播放状态枚举
 typedef enum {
     AUDIO_IDLE = 0,// 空闲

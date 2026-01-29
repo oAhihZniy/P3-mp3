@@ -10,7 +10,7 @@ static MP3FrameInfo mp3FrameInfo;
 static FIL mp3File;
 static AudioStatus_t audioStatus = AUDIO_IDLE;
 // 定义音量，范围 0~100
-static uint8_t volume = 30;// 默认音量 30%
+static uint8_t volume = 100;// 默认音量 80%
 
 uint32_t g_PlayedSamples = 0;
 uint32_t g_SampleRate = 44100; // 默认
@@ -36,9 +36,10 @@ static int Fill_MP3_InputBuffer(void) {
         memmove(mp3InBuf, readPtr, bytesLeft);
     }
     readPtr = mp3InBuf;
-
+    __disable_irq();
     // 2. 从 SD 卡读取新数据填满剩余空间
     FRESULT res = f_read(&mp3File, mp3InBuf + bytesLeft, MP3_IN_BUF_SIZE - bytesLeft, &br);
+    __enable_irq();
     if (res != FR_OK) return -1;
 
     bytesLeft += br;
@@ -135,21 +136,56 @@ void Audio_Stop(void) {// 停止播放
     audioStatus = AUDIO_STOPPED;
 }
 
-void Audio_Process(void) {// 主循环中调用，处理缓冲区填充
-    if (audioStatus != AUDIO_PLAYING) return;
+// void Audio_Process(void) {// 主循环中调用，处理缓冲区填充
+//     if (audioStatus != AUDIO_PLAYING) return;
+//
+//     if (fillBufferFlag == 1) { // 需填前半部
+//         if (Decode_Next_Frame(0) < 0) {
+//             Audio_Stop(); // 播放结束
+//             audioStatus = AUDIO_FINISHED; // 标记为自然结束
+//         }
+//         fillBufferFlag = 0;
+//     }
+//     else if (fillBufferFlag == 2) { // 需填后半部
+//         if (Decode_Next_Frame(AUDIO_BUF_SIZE / 4) < 0) {
+//             Audio_Stop(); // 播放结束
+//         }
+//         fillBufferFlag = 0;
+//     }
+// }
 
-    if (fillBufferFlag == 1) { // 需填前半部
-        if (Decode_Next_Frame(0) < 0) {
-            Audio_Stop(); // 播放结束
-            audioStatus = AUDIO_FINISHED; // 标记为自然结束
+
+
+// audio_driver.c 修正版任务处理
+void Audio_Process(void) {
+    if (audioStatus != AUDIO_PLAYING) return;
+    if (fillBufferFlag == 0) return;
+
+    uint8_t half = fillBufferFlag;
+    fillBufferFlag = 0; // 抢占式清除标志
+
+    // 16KB总字节 / 2(半区) / 2(每个uint16) = 4096个采样点
+    uint32_t half_samples = AUDIO_BUF_SIZE / 4;
+    uint32_t start_pos = (half == 1) ? 0 : half_samples;
+    uint32_t end_pos = start_pos + half_samples;
+
+    uint32_t current_pos = start_pos;
+
+    // (我是牢理) 贪婪循环：必须填满至少一帧以上的数据
+    // 如果剩余空间不足一帧最大尺寸(2304)，才退出
+    while (current_pos < (end_pos - 1152 * 2)) {
+        int err = Decode_Next_Frame(current_pos);
+
+        if (err < 0) {
+            // 这里可能是码流暂时断了或者文件结束
+            if (err == -1) { // 真正读完了
+                Audio_Stop();
+                audioStatus = AUDIO_FINISHED;
+                return;
+            }
+            break; // 其他错误尝试在下次循环修复
         }
-        fillBufferFlag = 0;
-    }
-    else if (fillBufferFlag == 2) { // 需填后半部
-        if (Decode_Next_Frame(AUDIO_BUF_SIZE / 4) < 0) {
-            Audio_Stop(); // 播放结束
-        }
-        fillBufferFlag = 0;
+        current_pos += mp3FrameInfo.outputSamps;
     }
 }
 
@@ -163,6 +199,7 @@ AudioStatus_t Audio_GetStatus(void) {// 获取当前播放状态
 void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s) {
     if (hi2s->Instance == SPI2) {
         fillBufferFlag = 1;
+        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
     }
 }
 
