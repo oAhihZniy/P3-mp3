@@ -117,6 +117,7 @@ void OLED_ShowChar(int16_t x, int16_t y, char chr, uint8_t color) {
     }
 }
 
+
 // 显示字符串
 void OLED_ShowString(uint8_t x, uint8_t y, char *str, uint8_t color) {
     while (*str) { OLED_ShowChar(x, y, *str, color); x += 8; str++; }
@@ -145,8 +146,49 @@ void OLED_DrawCJKChar(int16_t x, int16_t y, uint32_t unicode) {
     }
 }
 
+
 // 画线 (简单实现，仅支持水平线占位)
 void OLED_DrawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color) {
 
     for (uint8_t i = x1; i <= x2; i++) OLED_DrawPoint(i, y1, color); // 简单的水平线占位
 }
+
+
+// (我是牢理) 强健的 UTF-8 混合显示函数
+void OLED_ShowSDString(uint8_t x, uint8_t y, const char* str) {
+    const uint8_t* p = (const uint8_t*)str;
+    uint32_t unicode = 0;
+    uint8_t utf_bytes = 0;
+
+    while (*p) {
+        if ((*p & 0x80) == 0) {
+            // 1字节 ASCII (0xxxxxxx)
+            OLED_ShowChar(x, y, *p, 1);
+            x += 8;
+            p++;
+        }
+        else if ((*p & 0xE0) == 0xC0) {
+            // 2字节 字符 (通常是希腊字母、特殊符号)
+            unicode = ((*p & 0x1F) << 6) | (*(p + 1) & 0x3F);
+            OLED_DrawCJKChar(x, y, unicode);
+            x += 16;
+            p += 2;
+        }
+        else if ((*p & 0xF0) == 0xE0) {
+            // 3字节 中日韩汉字 (1110xxxx 10xxxxxx 10xxxxxx)
+            unicode = ((uint32_t)(p[0] & 0x0F) << 12) |
+                      ((uint32_t)(p[1] & 0x3F) << 6) |
+                      ((uint32_t)(p[2] & 0x3F));
+            OLED_DrawCJKChar(x, y, unicode);
+            x += 16;
+            p += 3;
+        }
+        else {
+            p++; // 忽略更高字节或其他错误
+        }
+
+        if (x > 120) break; // 屏幕边界保护
+    }
+}
+
+// (我是牢理) 专门显示 FatFs WCHAR 文件名的函数

@@ -22,4 +22,6 @@ void Playlist_AutoNext_Task(void);       // 自动切歌检查逻辑
 void Playlist_PlayCurrent(void);// 播放当前索引的歌曲
 extern Playlist_t g_playlist;
 
+void Debug_Scan_All_Files(void);
+
 #endif

@@ -118,39 +118,40 @@ int main(void)
   HAL_Delay(500);
   // 2. SD卡物理层初始化
   if (SD_Init() == 0) {
-    OLED_ShowString(0, 16, "SD HARDWARE: OK", 1);
+  OLED_ShowString(0, 16, "SD HARDWARE: OK", 1);
   } else {
-    OLED_ShowString(0, 16, "SD HARDWARE: FAIL", 1);
-    OLED_Update();
-    while(1); // 物理层不通，检查接线和供电
-  }
+  OLED_ShowString(0, 16, "SD HARDWARE: FAIL", 1);
   OLED_Update();
-
-  // 3. 挂载文件系统 (我是牢理提醒：路径用"0:"，立即挂载)
+  while(1); // 物理层不通，检查接线和供电
+  }
+  // OLED_Update();
+  //
+  // // 3. 挂载文件系统 (我是牢理提醒：路径用"0:"，立即挂载)
   res = f_mount(&fs, "0:", 1);
   if (res == FR_OK) {
-    OLED_ShowString(0, 32, "MOUNT SUCCESS!", 1);
+  OLED_ShowString(0, 32, "MOUNT SUCCESS!", 1);
   } else {
-    char err_msg[32];
-    sprintf(err_msg, "MOUNT ERR: %d", res);
-    OLED_ShowString(0, 32, err_msg, 1);
-    OLED_Update();
-    while(1);
+  char err_msg[32];
+  sprintf(err_msg, "MOUNT ERR: %d", res);
+  OLED_ShowString(0, 32, err_msg, 1);
+  OLED_Update();
+  while(1);
   }
   OLED_Update();
 
   // 4. 初始化字库 (我是牢理提醒：现在文件在根目录，路径为"0:/FONT.fon")
   res = OLED_FontInit("0:SYSTEM/font.bin");
   if (res == FR_OK) {
-    OLED_ShowString(0, 48, "FONT LOADED!", 1);
-    // 终极验证：画一个汉字
-    OLED_DrawCJKChar(100, 48, 0x4E2D); // Unicode "中"
+  OLED_ShowString(0, 48, "FONT LOADED!", 1);
+  // 终极验证：画一个汉字
+  OLED_DrawCJKChar(100, 48, 0x4E2D); // Unicode "中"
   } else {
-    char err_msg[32];
-    sprintf(err_msg, "FONT OPEN ERR: %d", res);
-    OLED_ShowString(0, 48, err_msg, 1);
+  char err_msg[32];
+  sprintf(err_msg, "FONT OPEN ERR: %d", res);
+  OLED_ShowString(0, 48, err_msg, 1);
   }
-  OLED_Update();
+  HAL_Delay(1000);
+  Debug_Scan_All_Files();
   HAL_Delay(1000); // 停顿一秒看清所有 OK
   /* USER CODE END 2 */
 
