@@ -62,6 +62,10 @@ FATFS fs;                 // 全局文件系统对象（必须放全局，防止
 FRESULT res;              // FatFs返回值
 uint32_t ui_timer = 0;    // UI刷新计时
 uint32_t key_timer = 0;   // 按键扫描计时
+
+uint32_t real_time_bytes = 0;
+uint32_t last_stat_tick = 0;
+int current_bw = 0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -73,7 +77,71 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 /* main.c Bundle up your dreams.mp3*/
+#include <stdio.h>
 
+/**
+ * (我是牢理) SD卡读取速度专项测试
+ * 逻辑：连续读取 1MB 数据，计算耗时
+ */
+void Test_SD_Read_Speed(void) {
+  FIL file;
+  UINT br;
+  uint8_t temp_buf[4096]; // 每次读 4KB
+  uint32_t start_tick, end_tick;
+  uint32_t total_read = 0;
+  const uint32_t target_size = 1024 * 1024; // 测试 1MB 数据
+  char msg[32];
+
+  OLED_Clear();
+  OLED_ShowString(0, 0, "TESTING SPEED...", 1);
+  OLED_Update();
+
+  // 1. 打开一个现成的 MP3 文件进行测试
+  if (f_open(&file, "0:/Bundle up your dreams.mp3", FA_READ) != FR_OK) {
+    OLED_ShowString(0, 16, "OPEN FAIL!", 1);
+    OLED_Update();
+    return;
+  }
+
+  // 2. 开始计时
+  start_tick = HAL_GetTick();
+
+  while (total_read < target_size) {
+    // 尝试读取数据
+    FRESULT res = f_read(&file, temp_buf, sizeof(temp_buf), &br);
+    if (res != FR_OK || br == 0) break;
+    total_read += br;
+  }
+
+  end_tick = HAL_GetTick();
+  f_close(&file);
+
+  // 3. 计算速度
+  uint32_t duration = end_tick - start_tick; // 耗时(ms)
+  if (duration == 0) duration = 1; // 防止除以0
+
+  // 速度 (KB/s) = (总字节 / 1024) / (时间 / 1000)
+  // 简化为：字节 / ms
+  uint32_t speed = total_read / duration;
+
+  // 4. 显示结果
+  OLED_Clear();
+  OLED_ShowString(0, 0, "READ SPEED TEST", 1);
+
+  sprintf(msg, "Size: %lu KB", total_read / 1024);
+  OLED_ShowString(0, 16, msg, 1);
+
+  sprintf(msg, "Time: %lu ms", duration);
+  OLED_ShowString(0, 32, msg, 1);
+
+  sprintf(msg, "Speed: %lu KB/s", speed);
+  OLED_ShowString(0, 48, msg, 1);
+
+  OLED_Update();
+
+  // 停在这里让我们看清数据
+  while(1);
+}
 /* USER CODE END 0 */
 
 /**
@@ -116,7 +184,6 @@ int main(void)
   OLED_Clear();
   OLED_ShowString(0, 0, "SYSTEM BOOT...", 1);
   OLED_Update();
-  HAL_Delay(200);
 
   // --- 2. 启动存储物理层 ---
   if (SD_Init() == 0) {
@@ -131,6 +198,7 @@ int main(void)
   // --- 3. 挂载文件系统 (GBK模式，无 L 前缀) ---
   res = f_mount(&fs, "0:", 1);
   if (res == FR_OK) {
+    SD_SPI_SpeedHigh();
     OLED_ShowString(0, 32, "MOUNT: SUCCESS", 1);
   } else {
     char err_buf[32];
@@ -151,7 +219,7 @@ int main(void)
     OLED_ShowString(0, 48, "FONT MISSING", 1);
   }
   OLED_Update();
-  HAL_Delay(500); // 稍微停顿展示状态
+
 
   // --- 5. 音频引擎初始化 ---
   Audio_Init();
@@ -164,7 +232,7 @@ int main(void)
     OLED_ShowString(0, 0, info, 1);
     OLED_ShowString(0, 16, "STARTING...", 1);
     OLED_Update();
-    HAL_Delay(500);
+
 
     // (我是牢理) 点火！播放第一首歌
     Playlist_PlayCurrent();
@@ -193,7 +261,11 @@ int main(void)
       key_timer = HAL_GetTick();
       App_Task_Keyboard();
     }
-
+    static uint32_t test_tick = 0;
+    if (HAL_GetTick() - test_tick >= 500) {
+      test_tick = HAL_GetTick();
+      HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13); // PC13 蓝色灯
+    }
     // (我是牢理) 任务 4: UI 刷新 (每 50ms 一次)
     // 杜邦线环境下，适当降低 UI 刷新率(从30ms降到50ms)，把 SPI 带宽让给音频
     if (HAL_GetTick() - ui_timer >= 50) {

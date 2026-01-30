@@ -57,27 +57,42 @@ void UI_DrawMixedScrollTitle(uint8_t y, const char* str, uint32_t tick) {
     }
 }
 
+
+extern uint32_t real_time_bytes;
+extern uint32_t last_stat_tick;
+extern uint32_t current_bw;
+
 void UI_Refresh_Task(void) {
-    char info_str[32];
-    uint32_t elapsed = Audio_GetElapsedSec();
+    char info[32];
+    uint32_t now = HAL_GetTick();
+
+    // 1. 带宽计算逻辑 (1秒更新一次)
+    if (now - last_stat_tick >= 1000) {
+        current_bw = (float)real_time_bytes / 1024.0f;
+        real_time_bytes = 0;
+        last_stat_tick = now;
+    }
 
     OLED_Clear();
 
-    // 1. 顶部：索引和播放状态 (P3 风格)
-    // 格式: "01/15  >" (播放) 或 "01/15  ||" (暂停)
-    snprintf(info_str, sizeof(info_str), "%02d/%02d  %s",
+    // 2. 状态栏：显示当前歌曲/总数
+    snprintf(info, sizeof(info), "%02d/%02d  %s",
              g_playlist.current_index + 1, g_playlist.total_count,
-             (Audio_GetStatus() == AUDIO_PLAYING) ? ">" : "||");
-    OLED_ShowString(0, 0, info_str, 1);
+             (Audio_GetStatus() == AUDIO_PLAYING) ? "PLAY" : "PAUSE");
+    OLED_ShowString(0, 0, info, 1);
 
-    // 2. 中部：中日韩混合滚动歌名
-    UI_DrawMixedScrollTitle(12, g_playlist.current_filename, HAL_GetTick());
+    // 3. 歌名滚动栏 (UI 中间)
+    UI_DrawMixedScrollTitle(18, g_playlist.current_filename, now);
 
-    // 3. 底部：进度条 + 播放时间
-    OLED_DrawProgressBar(0, 28, 90, 4, 0); // 进度目前设为0，后续可根据时长计算
+    // 4. 底部测速与时间 (UI 最下面)
+    uint32_t sec = Audio_GetElapsedSec();
+    // 格式化输出：左边是测速，右边是播放时间
+    snprintf(info, sizeof(info), "%luK/s    %02lu:%02lu",
+             current_bw, sec / 60, sec % 60);
+    OLED_ShowString(5, 50, info, 1);
 
-    snprintf(info_str, sizeof(info_str), "%02lu:%02lu", elapsed / 60, elapsed % 60);
-    OLED_ShowString(40, 32, info_str, 1);
+    // 5. 进度条 (P3 风格)
+    OLED_DrawProgressBar(0, 42, 128, 4, (sec % 300) * 100 / 300);
 
     OLED_Update();
 }

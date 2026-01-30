@@ -30,7 +30,7 @@
 // 片选信号控制 (PA4)
 #define SD_CS_LOW()     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET)
 #define SD_CS_HIGH()    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET)
-
+void SD_SPI_SpeedHigh(void);
 // 函数声明
 uint8_t SD_Init(void);
 uint8_t SD_ReadDisk(uint8_t* buf, uint32_t sector, uint8_t cnt);

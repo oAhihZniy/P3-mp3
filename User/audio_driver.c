@@ -2,141 +2,190 @@
 #include "i2s.h"
 #include <string.h>
 
-/* --- 全局变量 --- */
-uint8_t mp3InBuf[MP3_IN_BUF_SIZE];
-uint8_t *readPtr = mp3InBuf;
-int bytesLeft = 0;
-HMP3Decoder hMP3Decoder;
-MP3FrameInfo mp3FrameInfo;
+/* ================== 私有变量定义 ================== */
 
-/* --- 私有控制变量 --- */
+// --- 核心对象 ---
+static HMP3Decoder hMP3Decoder;
 static FIL mp3File;
-static AudioStatus_t audioStatus = AUDIO_IDLE;
-static uint8_t volume = 40; // 默认音量 40%
+MP3FrameInfo g_mp3FrameInfo; // 导出给外部看信息的
 
-// 统计
-static uint32_t g_PlayedSamples = 0;
-static uint32_t g_SampleRate = 44100;
-
-// 输出缓冲区 (DMA用)
-// 大小为 24KB (12288 个 uint16_t)
+// --- 缓冲区管理 ---
+// I2S DMA 输出缓冲区 (16bit PCM)
 uint16_t AudioBuffer[AUDIO_BUF_SIZE / 2];
 
-// DMA 双缓冲标志位
-static volatile uint8_t fillBufferFlag = 0;
+// MP3 码流输入缓冲区
+static uint8_t mp3InBuf[MP3_IN_BUF_SIZE];
+static uint8_t *readPtr = mp3InBuf;
+static int bytesLeft = 0;
 
-/* ================== 1. 核心底层逻辑 (保留你之前的) ================== */
+// --- 控制标志 ---
+static volatile uint8_t fillBufferFlag = 0; // 0:空闲, 1:填前半, 2:填后半
+static AudioStatus_t audioStatus = AUDIO_IDLE;
+static uint8_t currentVolume = 40;
 
-void Audio_Stream_Init(void) {
-    memset(mp3InBuf, 0, sizeof(mp3InBuf));
-    readPtr = mp3InBuf;
-    bytesLeft = 0;
+// --- 统计数据 ---
+static uint32_t playedSamples = 0;
+static uint32_t currentSampleRate = 44100;
+
+/* ================== 内部辅助函数 ================== */
+
+/**
+ * (我是牢理) 动态调整 I2S 硬件采样率
+ * 当 MP3 从 44.1k 变成 48k 时自动适配
+ */
+static void Audio_Set_I2S_Freq(uint32_t freq) {
+    if (hi2s2.Init.AudioFreq != freq) {
+        HAL_I2S_DMAStop(&hi2s2);  // 必须先停机
+        hi2s2.Init.AudioFreq = freq;
+        if (HAL_I2S_Init(&hi2s2) != HAL_OK) {
+            audioStatus = AUDIO_ERROR;
+        }
+        currentSampleRate = freq;
+    }
 }
 
-int Audio_Fill_Stream(FIL* file) {
-    UINT br = 0;
-    if (bytesLeft > 0 && readPtr != mp3InBuf) {
-        memmove(mp3InBuf, readPtr, bytesLeft);
-    }
-    readPtr = mp3InBuf;
+/**
+ * 软件音量控制 (原位运算，不拉伸)
+ * 针对 16 bits Data on 16 bits Frame 模式
+ */
+static void Apply_Volume(int16_t* pcm, int samples) {
+    if (currentVolume >= 100) return; // 满音量不计算
 
-    int space_available = MP3_IN_BUF_SIZE - bytesLeft;
-    if (space_available >= 512) {
-        // (我是牢理) 杜邦线防干扰保护
-        // __disable_irq();
-        FRESULT res = f_read(file, mp3InBuf + bytesLeft, space_available, &br);
-        // __enable_irq();
-        if (res != FR_OK) return -1;
+    for (int i = 0; i < samples; i++) {
+        int32_t temp = pcm[i];
+        pcm[i] = (int16_t)((temp * currentVolume) / 100);
+    }
+}
+
+/**
+ * 补充 MP3 码流数据
+ */
+extern uint32_t real_time_bytes;// 引用 main.c 里的变量 用完记得删
+// static int Fill_Stream_Buffer(void) {
+//     UINT br;
+//     // 1. 数据搬运：把没解完的尾巴搬到头部
+//     if (bytesLeft > 0 && readPtr != mp3InBuf) {
+//         memmove(mp3InBuf, readPtr, bytesLeft);
+//     }
+//     readPtr = mp3InBuf;
+//
+//     // 2. 计算空余空间
+//     int space = MP3_IN_BUF_SIZE - bytesLeft;
+//     if (space < 512) return 0; // 空间太小不读
+//
+//     // 3. 读卡 (杜邦线环境建议不要频繁开关中断，除非极其不稳)
+//     FRESULT res = f_read(&mp3File, mp3InBuf + bytesLeft, space, &br);
+//     if (res != FR_OK) return -1;
+//
+//     real_time_bytes += br; // <--- 关键：没这行，速度永远是 0
+//     bytesLeft += br;
+//     return br;
+// }
+static int Fill_Stream_Buffer(void) {
+    UINT br;
+    if (bytesLeft > 2048) return 0; // 还有粮，不急着读
+
+    if (readPtr != mp3InBuf) {
+        memmove(mp3InBuf, readPtr, bytesLeft);
+        readPtr = mp3InBuf;
+    }
+
+    int space = MP3_IN_BUF_SIZE - bytesLeft;
+
+    // (我是牢理) 一口气读满 4KB-6KB，减少 f_read 的次数
+    // 杜邦线环境下，我们通过关闭中断保证这一大块数据传输不被打断
+    // __disable_irq();
+    FRESULT res = f_read(&mp3File, mp3InBuf + bytesLeft, space, &br);
+    // __enable_irq();
+
+    if (res == FR_OK) {
+        real_time_bytes += br; // 用于测速
         bytesLeft += br;
     }
     return br;
 }
 
-void Audio_Decoder_Init(void) {
-    hMP3Decoder = MP3InitDecoder();
+/**
+ * 跳过 ID3v2 标签头
+ */
+static void Skip_ID3_Tag(void) {
+    uint8_t header[10];
+    UINT br;
+
+    f_lseek(&mp3File, 0);
+    f_read(&mp3File, header, 10, &br);
+
+    if (br == 10 && header[0] == 'I' && header[1] == 'D' && header[2] == '3') {
+        // 计算标签大小 (每个字节低7位有效)
+        uint32_t size = ((header[6] & 0x7F) << 21) |
+                        ((header[7] & 0x7F) << 14) |
+                        ((header[8] & 0x7F) << 7)  |
+                         (header[9] & 0x7F);
+        f_lseek(&mp3File, size + 10);
+    } else {
+        f_lseek(&mp3File, 0); // 不是ID3，回到开头
+    }
+
+    // 重置流指针
+    bytesLeft = 0;
+    readPtr = mp3InBuf;
 }
 
-int Audio_Decode_Frame(int16_t *pcm_out) {
-    int syncOffset, err;
-    if (bytesLeft < 2048) return -1;
+/**
+ * 解码一帧并写入目标缓冲区
+ * target_buf: AudioBuffer 中的某个偏移位置
+ */
+static int Decode_Frame_To_Buffer(int16_t *target_buf) {
+    // 1. 检查数据余量
+    if (bytesLeft < 2048) {
+        if (Fill_Stream_Buffer() <= 0 && bytesLeft == 0) return -1; // 文件结束
+    }
 
-    syncOffset = MP3FindSyncWord(readPtr, bytesLeft);
-    if (syncOffset < 0) {
-        if (bytesLeft > (MP3_IN_BUF_SIZE - 512)) {
+    // 2. 寻找同步字
+    int offset = MP3FindSyncWord(readPtr, bytesLeft);
+    if (offset < 0) {
+        // 没找到，丢弃大部分数据，防止死循环
+        if (bytesLeft > 1024) {
             readPtr += 1024; bytesLeft -= 1024;
+        } else {
+            bytesLeft = 0; // 清空重读
         }
         return -2;
     }
 
-    readPtr += syncOffset;
-    bytesLeft -= syncOffset;
+    readPtr += offset;
+    bytesLeft -= offset;
 
-    err = MP3Decode(hMP3Decoder, &readPtr, &bytesLeft, pcm_out, 0);
+    // 3. 解码
+    int err = MP3Decode(hMP3Decoder, &readPtr, &bytesLeft, target_buf, 0);
 
-    if (err != ERR_MP3_NONE) {
+    if (err == ERR_MP3_NONE) {
+        MP3GetLastFrameInfo(hMP3Decoder, &g_mp3FrameInfo);
+
+        // 应用音量
+        Apply_Volume(target_buf, g_mp3FrameInfo.outputSamps);
+
+        // 更新统计
+        playedSamples += g_mp3FrameInfo.outputSamps / 2;
+
+        return 0; // 成功
+    } else {
+        // 错误处理：跳过少量字节尝试恢复
         if (bytesLeft > 2) { readPtr += 2; bytesLeft -= 2; }
-        else { bytesLeft = 0; }
+        else bytesLeft = 0;
         return err;
     }
-    MP3GetLastFrameInfo(hMP3Decoder, &mp3FrameInfo);
-    return 0;
 }
 
-void Audio_Skip_ID3(FIL* file) {
-    uint8_t header[10];
-    UINT br;
-    f_lseek(file, 0);
-    f_read(file, header, 10, &br);
-    if (br == 10 && header[0] == 'I' && header[1] == 'D' && header[2] == '3') {
-        uint32_t tag_size = ((header[6] & 0x7F) << 21) | ((header[7] & 0x7F) << 14) |
-                            ((header[8] & 0x7F) << 7)  | (header[9] & 0x7F);
-        f_lseek(file, tag_size + 10);
-        bytesLeft = 0; readPtr = mp3InBuf;
-    } else {
-        f_lseek(file, 0);
-    }
-}
-
-/* ================== 2. 核心中层逻辑 (新增：格式拉伸) ================== */
-
-/**
- * (我是牢理) 将 Helix 的 16位紧凑数据，拉伸为 I2S 的 32位帧格式 (16数据+16补零)
- * 同时应用音量。
- * pcm_in: 既是输入也是输出 (AudioBuffer 的指针)
- * samples: 这一帧的总采样点数
- */
-// static void Format_And_Volume(short* pcm_in, int samples) {
-//     uint16_t* pOut = (uint16_t*)pcm_in;
-//     // 必须逆向循环，防止覆盖
-//     for (int i = samples - 1; i >= 0; i--) {
-//         int32_t temp = (int32_t)pcm_in[i];
-//         uint16_t val = (uint16_t)((temp * volume) / 100);
-//
-//         // [Data] [0] [Data] [0] ...
-//         pOut[i * 2] = val;
-//         pOut[i * 2 + 1] = 0;
-//     }
-// }
-static void Format_And_Volume(short* pcm, int samples) {
-    if (volume == 100) return; // 满音量直接跳过
-
-    for (int i = 0; i < samples; i++) {
-        int32_t temp = (int32_t)pcm[i];
-        // 简单的线性音量缩放
-        pcm[i] = (short)((temp * volume) / 100);
-    }
-}
-
-/* ================== 3. 高层控制逻辑 (新增：播放与调度) ================== */
+/* ================== 外部接口实现 ================== */
 
 void Audio_Init(void) {
-    Audio_Decoder_Init();
-    Audio_Stream_Init();
+    hMP3Decoder = MP3InitDecoder();
     audioStatus = AUDIO_IDLE;
 }
 
 FRESULT Audio_Play(const char* filename) {
-    Audio_Stop();
+    Audio_Stop(); // 停止当前播放
 
     FRESULT res = f_open(&mp3File, filename, FA_READ);
     if (res != FR_OK) {
@@ -144,26 +193,60 @@ FRESULT Audio_Play(const char* filename) {
         return res;
     }
 
-    Audio_Skip_ID3(&mp3File);
-    Audio_Stream_Init(); // 重置缓冲区指针
-    g_PlayedSamples = 0;
+    // 1. 准备数据
+    Skip_ID3_Tag();
+    playedSamples = 0;
     memset(AudioBuffer, 0, sizeof(AudioBuffer));
+    fillBufferFlag = 0;
 
-    // 预解码两帧，填满缓冲区的一部分，防止启动噪音
-    Audio_Fill_Stream(&mp3File); // 第一次先读满
-
-    // (我是牢理) 这里的 0 是 AudioBuffer 的偏移量
-    short* pStart = (short*)&AudioBuffer[0];
-    if (Audio_Decode_Frame(pStart) == 0) {
-        Format_And_Volume(pStart, mp3FrameInfo.outputSamps);
+    // 2. 预解码探测 (检测采样率)
+    // 解码第一帧到缓冲区头部
+    if (Decode_Frame_To_Buffer((int16_t*)AudioBuffer) == 0) {
+        // 只有在开始时允许调整 I2S 时钟
+        Audio_Set_I2S_Freq(g_mp3FrameInfo.samprate);
     }
 
-    // 启动 DMA (Circular模式)
-    // 传输长度 = 数组元素个数
+    // 3. 启动 DMA (循环模式)
+    // 长度单位是 uint16_t 的数量
     HAL_I2S_Transmit_DMA(&hi2s2, AudioBuffer, AUDIO_BUF_SIZE / 2);
 
     audioStatus = AUDIO_PLAYING;
     return FR_OK;
+}
+
+void Audio_Process(void) {
+    if (audioStatus != AUDIO_PLAYING || fillBufferFlag == 0) return;
+
+    // 锁定当前要填写的半区
+    uint8_t part = fillBufferFlag;
+    fillBufferFlag = 0; // 清除标志
+
+    // 计算半区边界 (单位: int16_t)
+    // 16KB总大小 / 2字节 = 8192个点
+    // 半区 = 4096 个点
+    uint32_t half_samples = AUDIO_BUF_SIZE / 4;
+    uint32_t start_idx = (part == 1) ? 0 : half_samples;
+    uint32_t end_idx   = start_idx + half_samples;
+    uint32_t curr_idx  = start_idx;
+
+    // 贪婪循环：直到填满半区
+    // 2304 是标准帧最大采样数，留出余量防止溢出
+    while (curr_idx < (end_idx - 2304)) {
+        int err = Decode_Frame_To_Buffer((int16_t*)&AudioBuffer[curr_idx]);
+
+        if (err == 0) {
+            // 成功，指针后移
+            curr_idx += g_mp3FrameInfo.outputSamps;
+        } else if (err == -1) {
+            // 文件结束
+            Audio_Stop();
+            audioStatus = AUDIO_FINISHED;
+            break;
+        } else {
+            // 解码错误，本次循环不做指针移动，尝试下一次解码
+            // 或者可以填静音
+        }
+    }
 }
 
 void Audio_Stop(void) {
@@ -172,70 +255,32 @@ void Audio_Stop(void) {
     audioStatus = AUDIO_STOPPED;
 }
 
-// 【核心调度器】放在 main while(1) 中
-void Audio_Process(void) {
-    if (audioStatus != AUDIO_PLAYING) return;
-
-    // 尝试补货
-    Audio_Fill_Stream(&mp3File);
-
-    // 检查 DMA 是否需要新数据
-    if (fillBufferFlag == 0) return;
-
-    uint8_t half = fillBufferFlag;
-    fillBufferFlag = 0;
-
-    // 半区长度 (单位: uint16_t) -> 24KB / 2 / 2 = 6144
-    uint32_t half_len = AUDIO_BUF_SIZE / 4;
-    uint32_t start_pos = (half == 1) ? 0 : half_len;
-    uint32_t end_pos = start_pos + half_len;
-    uint32_t current_pos = start_pos;
-
-    // (我是牢理) 贪婪填充循环
-    // 4608 是拉伸后一帧占用的空间 (2304 * 2)
-    while (current_pos < (end_pos - 2304)) {
-        short* pOut = (short*)&AudioBuffer[current_pos];
-        int err = Audio_Decode_Frame(pOut);
-
-        if (err < 0) {
-            if (err == -1) { // 读到文件尾
-                Audio_Stop();
-                audioStatus = AUDIO_FINISHED;
-            }
-            break;
-        }
-
-        // 格式化并拉伸数据
-        Format_And_Volume(pOut, mp3FrameInfo.outputSamps);
-
-        // 更新统计
-        g_PlayedSamples += mp3FrameInfo.outputSamps / 2;
-        g_SampleRate = mp3FrameInfo.samprate;
-
-        // 指针后移 (采样数 * 2，因为拉伸了)
-        current_pos += (mp3FrameInfo.outputSamps );
-    }
-}
-
-// 辅助控制函数
 void Audio_PauseResume(void) {
     if (audioStatus == AUDIO_PLAYING) {
         HAL_I2S_DMAPause(&hi2s2);
-        audioStatus = AUDIO_STOPPED; // 标记为停止，防止 Process 继续填
+        audioStatus = AUDIO_STOPPED;
     } else if (audioStatus == AUDIO_STOPPED) {
         HAL_I2S_DMAResume(&hi2s2);
         audioStatus = AUDIO_PLAYING;
     }
 }
-
+AudioStatus_t Audio_GetStatus(void) { return audioStatus; }
 void Audio_SetVolume(uint8_t vol) {
-    volume = (vol > 100) ? 100 : vol;
+    currentVolume = (vol > 100) ? 100 : vol;
 }
 
-uint8_t Audio_GetVolume(void) { return volume; }
-AudioStatus_t Audio_GetStatus(void) { return audioStatus; }
-uint32_t Audio_GetElapsedSec(void) { return (g_SampleRate > 0) ? g_PlayedSamples / g_SampleRate : 0; }
-void Audio_ResetTimer(void) { g_PlayedSamples = 0; }
+uint8_t Audio_GetVolume(void) {
+    return currentVolume;
+}
+
+uint32_t Audio_GetElapsedSec(void) {
+    if (currentSampleRate == 0) return 0;
+    return playedSamples / currentSampleRate;
+}
+
+void Audio_ResetTimer(void) {
+    playedSamples = 0;
+}
 
 /* ================== 中断回调 ================== */
 void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s) {

@@ -5,47 +5,39 @@
 #include "ff.h"
 #include "mp3dec.h"
 
-// --- 缓冲区配置 ---
-// 16-bit on 32-bit 模式：1帧 MP3 (2304采样) 拉伸后占用 9216 字节
-// 设定总缓冲 24KB (每半区 12KB)，足够容纳任何一帧并留有余量
-#define AUDIO_BUF_SIZE    24576
-#define MP3_IN_BUF_SIZE   8192
+/* --- 配置参数 --- */
+// 输出缓冲区：16KB (8192个双字节采样点)
+// 半区 4096 个采样点，足以容纳一帧 MP3 (2304采样)
+#define AUDIO_BUF_SIZE    16384*4
+// 输入缓冲区：8KB (减少 SD 卡读取频次)
+#define MP3_IN_BUF_SIZE   8196*2
 
-// --- 播放状态枚举 ---
+/* --- 状态机 --- */
 typedef enum {
-    AUDIO_IDLE = 0,
-    AUDIO_PLAYING,
-    AUDIO_STOPPED,
-    AUDIO_FINISHED, // 播放自然结束
-    AUDIO_ERROR
+    AUDIO_IDLE = 0,     // 未初始化或空闲
+    AUDIO_PLAYING,      // 正在播放
+    AUDIO_STOPPED,      // 用户暂停/停止
+    AUDIO_FINISHED,     // 文件自然播放结束
+    AUDIO_ERROR         // 发生硬件错误
 } AudioStatus_t;
 
-// --- 变量导出 ---
-extern MP3FrameInfo mp3FrameInfo;
-extern uint8_t mp3InBuf[MP3_IN_BUF_SIZE];
-extern uint8_t *readPtr;
-extern int bytesLeft;
-// 导出 AudioBuffer 供 main.c 的正弦波测试用 (如果需要)
-extern uint16_t AudioBuffer[AUDIO_BUF_SIZE / 2];
+/* --- 全局变量导出 (供 main.c 调试用) --- */
+extern MP3FrameInfo g_mp3FrameInfo;
+extern uint16_t AudioBuffer[AUDIO_BUF_SIZE / 2]; // I2S DMA 缓冲区
 
-// --- 函数接口 ---
-// 1. 初始化与底层
+/* --- API 接口 --- */
+// 1. 系统级
 void Audio_Init(void);
-void Audio_Stream_Init(void);
-int Audio_Fill_Stream(FIL* file);
-void Audio_Decoder_Init(void);
-int Audio_Decode_Frame(int16_t *pcm_out);
-void Audio_Skip_ID3(FIL* file);
+void Audio_Process(void); // 【核心】主循环任务
 
-// 2. 高层控制 (你缺少的)
+// 2. 播放控制
 FRESULT Audio_Play(const char* filename);
 void Audio_Stop(void);
 void Audio_PauseResume(void);
-void Audio_Process(void); // 主循环任务
 
-// 3. 状态与设置
+// 3. 参数设置
 AudioStatus_t Audio_GetStatus(void);
-void Audio_SetVolume(uint8_t vol);
+void Audio_SetVolume(uint8_t vol); // 0-100
 uint8_t Audio_GetVolume(void);
 uint32_t Audio_GetElapsedSec(void);
 void Audio_ResetTimer(void);
