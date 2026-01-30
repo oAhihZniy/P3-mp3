@@ -23,10 +23,18 @@ void App_Task_Keyboard(void) {
     // --- 2. 音量控制 (PA1, PA2) - 允许长按连续调节 ---
     // 这里不需要松手检测，按住就会一直慢慢变
     if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1) == GPIO_PIN_RESET) { // Vol +
-        Audio_SetVolume(Audio_GetVolume() + 2);
+        uint8_t v = Audio_GetVolume();
+        if (v < 100) {
+            Audio_SetVolume(Audio_GetVolume() + 1);
+        }
     }
     if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2) == GPIO_PIN_RESET) { // Vol -
-        Audio_SetVolume(Audio_GetVolume() - 2);
+        uint8_t v = Audio_GetVolume();
+        if (v > 0) {
+            Audio_SetVolume(Audio_GetVolume() - 1);
+        }else {
+            Audio_SetVolume(0);
+        }
     }
 
     // --- 3. 下一曲 (PB0) - 状态机消抖 ---

@@ -14,7 +14,7 @@ MP3FrameInfo g_mp3FrameInfo;
 
 static volatile uint8_t fillBufferFlag = 0;
 static AudioStatus_t audioStatus = AUDIO_IDLE;
-static uint8_t currentVolume = 5;
+static uint8_t currentVolume = 30;
 static uint32_t playedSamples = 0;
 static uint32_t currentSampleRate = 44100;
 
@@ -44,11 +44,14 @@ void Audio_Set_I2S_Freq(uint32_t freq) {
     // (我是牢理) 更新记录当前的采样率
     currentSampleRate = freq;
 }
+
+/** 设置音量 (0~100)
+ */
 static void Apply_Volume(int16_t* pcm, int samples) {
-    if (currentVolume >= 100) return;
+    if (currentVolume > 100) return;
     for (int i = 0; i < samples; i++) {
         int32_t temp = pcm[i];
-        pcm[i] = (int16_t)((temp * currentVolume) / 100);
+        pcm[i] = (int16_t)((temp * currentVolume) / 500);
     }
 }
 
@@ -215,7 +218,15 @@ void Audio_Stream_Init(void) {
     readPtr = mp3InBuf;
     memset(mp3InBuf, 0, sizeof(mp3InBuf));
 }
-void Audio_SetVolume(uint8_t vol) { currentVolume = (vol > 100) ? 100 : vol; }
+void Audio_SetVolume(uint8_t vol) {
+    if (vol > 100) {
+        currentVolume = 100;
+    } else if (vol <= 0) {
+        currentVolume = 0;
+    } else {
+        currentVolume = vol;
+    }
+}
 uint8_t Audio_GetVolume(void) { return currentVolume; }
 AudioStatus_t Audio_GetStatus(void) { return audioStatus; }
 uint32_t Audio_GetElapsedSec(void) { return (currentSampleRate > 0) ? playedSamples / currentSampleRate : 0; }
