@@ -42,7 +42,7 @@ void App_Task_Keyboard(void) {
 
     // --- 4. 上一曲 (假设在 PB3，根据你之前的规划) ---
     static uint8_t prev_cnt = 0;
-    if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3) == GPIO_PIN_RESET) {
+    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_3) == GPIO_PIN_RESET) {
         if (prev_cnt < 3) prev_cnt++;
         if (prev_cnt == 2) {
             Playlist_Prev();
