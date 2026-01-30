@@ -105,16 +105,25 @@ void Audio_Skip_ID3(FIL* file) {
  * pcm_in: 既是输入也是输出 (AudioBuffer 的指针)
  * samples: 这一帧的总采样点数
  */
-static void Format_And_Volume(short* pcm_in, int samples) {
-    uint16_t* pOut = (uint16_t*)pcm_in;
-    // 必须逆向循环，防止覆盖
-    for (int i = samples - 1; i >= 0; i--) {
-        int32_t temp = (int32_t)pcm_in[i];
-        uint16_t val = (uint16_t)((temp * volume) / 100);
+// static void Format_And_Volume(short* pcm_in, int samples) {
+//     uint16_t* pOut = (uint16_t*)pcm_in;
+//     // 必须逆向循环，防止覆盖
+//     for (int i = samples - 1; i >= 0; i--) {
+//         int32_t temp = (int32_t)pcm_in[i];
+//         uint16_t val = (uint16_t)((temp * volume) / 100);
+//
+//         // [Data] [0] [Data] [0] ...
+//         pOut[i * 2] = val;
+//         pOut[i * 2 + 1] = 0;
+//     }
+// }
+static void Format_And_Volume(short* pcm, int samples) {
+    if (volume == 100) return; // 满音量直接跳过
 
-        // [Data] [0] [Data] [0] ...
-        pOut[i * 2] = val;
-        pOut[i * 2 + 1] = 0;
+    for (int i = 0; i < samples; i++) {
+        int32_t temp = (int32_t)pcm[i];
+        // 简单的线性音量缩放
+        pcm[i] = (short)((temp * volume) / 100);
     }
 }
 
@@ -184,7 +193,7 @@ void Audio_Process(void) {
 
     // (我是牢理) 贪婪填充循环
     // 4608 是拉伸后一帧占用的空间 (2304 * 2)
-    while (current_pos < (end_pos - 4608)) {
+    while (current_pos < (end_pos - 2304)) {
         short* pOut = (short*)&AudioBuffer[current_pos];
         int err = Audio_Decode_Frame(pOut);
 
@@ -204,7 +213,7 @@ void Audio_Process(void) {
         g_SampleRate = mp3FrameInfo.samprate;
 
         // 指针后移 (采样数 * 2，因为拉伸了)
-        current_pos += (mp3FrameInfo.outputSamps * 2);
+        current_pos += (mp3FrameInfo.outputSamps );
     }
 }
 
