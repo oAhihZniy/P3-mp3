@@ -106,46 +106,46 @@ void Playlist_AutoNext_Task(void) {
 }
 
 // 根目录全文件扫描函数
-void Debug_Scan_All_Files(void) {
-    DIR dir;
-    FILINFO fno;
-    FRESULT res;
-    int line = 0;
-
-    OLED_Clear();
-    OLED_ShowString(0, 0, "-- ROOT FILES --", 1);
-    OLED_Update();
-
-    // 1. 打开根目录
-    res = f_opendir(&dir, "/");
-    if (res != FR_OK) {
-        OLED_ShowString(0, 16, "OPEN DIR FAIL", 1);
-        OLED_Update();
-        return;
-    }
-
-    // 2. 循环读取目录项
-    while (f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0) {
-        // 最多显示 3 行（留下标题行）
-        if (line < 5) {
-            char display_buf[32];
-            // 如果是文件夹，加个[D]前缀
-            if (fno.fattrib & AM_DIR) {
-                snprintf(display_buf, sizeof(display_buf), "[D] %s", fno.fname);
-            } else {
-                snprintf(display_buf, sizeof(display_buf), "    %s", fno.fname);
-            }
-
-            // 关键：这里使用你的中日韩混合显示函数
-            // 假设每一行 16 像素高
-            OLED_ShowSDString(0, (int16_t)(-16 + (line * 16)), display_buf);
-            line++;
-        } else {
-            // 如果文件太多，屏幕放不下了
-            OLED_ShowString(0, 48, "MORE FILES...", 1);
-            break;
-        }
-    }
-    f_closedir(&dir);
-    OLED_Update();
-}
+// void Debug_Scan_All_Files(void) {
+//     DIR dir;
+//     FILINFO fno;
+//     FRESULT res;
+//     int line = 0;
+//
+//     OLED_Clear();
+//     OLED_ShowString(0, 0, "-- ROOT FILES --", 1);
+//     OLED_Update();
+//
+//     // 1. 打开根目录
+//     res = f_opendir(&dir, "/");
+//     if (res != FR_OK) {
+//         OLED_ShowString(0, 16, "OPEN DIR FAIL", 1);
+//         OLED_Update();
+//         return;
+//     }
+//
+//     // 2. 循环读取目录项
+//     while (f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != 0) {
+//         // 最多显示 3 行（留下标题行）
+//         if (line < 5) {
+//             char display_buf[32];
+//             // 如果是文件夹，加个[D]前缀
+//             if (fno.fattrib & AM_DIR) {
+//                 snprintf(display_buf, sizeof(display_buf), "[D] %s", fno.fname);
+//             } else {
+//                 snprintf(display_buf, sizeof(display_buf), "    %s", fno.fname);
+//             }
+//
+//             // 关键：这里使用你的中日韩混合显示函数
+//             // 假设每一行 16 像素高
+//             OLED_ShowSDString(0, (int16_t)(-16 + (line * 16)), display_buf);
+//             line++;
+//         } else {
+//             // 如果文件太多，屏幕放不下了
+//             OLED_ShowString(0, 48, "MORE FILES...", 1);
+//             break;
+//         }
+//     }
+//     f_closedir(&dir);
+//     OLED_Update();
+//  }

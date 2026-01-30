@@ -77,7 +77,7 @@ void UI_Refresh_Task(void) {
     OLED_DrawProgressBar(0, 28, 90, 4, 0); // 进度目前设为0，后续可根据时长计算
 
     snprintf(info_str, sizeof(info_str), "%02lu:%02lu", elapsed / 60, elapsed % 60);
-    OLED_ShowString(95, 26, info_str, 1);
+    OLED_ShowString(40, 32, info_str, 1);
 
     OLED_Update();
 }

@@ -36,7 +36,8 @@
 #include "app_task.h"
 #include <stdio.h>
 #include <string.h>
-#include <tgmath.h>
+
+#include "mp3dec.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -71,6 +72,7 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/* main.c Bundle up your dreams.mp3*/
 
 /* USER CODE END 0 */
 
@@ -110,63 +112,65 @@ int main(void)
   MX_FATFS_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-  // --- 2. 视觉系统启动 ---
   OLED_Init();
   OLED_Clear();
-  OLED_ShowString(0, 0, "PERSONA 3 MP3", 1);
-  OLED_ShowString(0, 16, "INITIALIZING...", 1);
+  OLED_ShowString(0, 0, "SYSTEM BOOT...", 1);
   OLED_Update();
+  HAL_Delay(200);
 
-  // --- 3. 存储系统启动 ---
+  // --- 2. 启动存储物理层 ---
   if (SD_Init() == 0) {
-    OLED_ShowString(0, 32, "SD PHYS: OK", 1);
+    OLED_ShowString(0, 16, "SD HARDWARE: OK", 1);
   } else {
-    OLED_ShowString(0, 32, "SD PHYS: FAIL", 1);
+    OLED_ShowString(0, 16, "SD HARDWARE: FAIL", 1);
     OLED_Update();
-    while(1); // 物理层不通，检查杜邦线
+    while(1); // 物理层挂了，死循环等待检查
   }
   OLED_Update();
 
-  // --- 4. 挂载文件系统 (LFN_UNICODE=0 模式) ---
+  // --- 3. 挂载文件系统 (GBK模式，无 L 前缀) ---
   res = f_mount(&fs, "0:", 1);
   if (res == FR_OK) {
-    OLED_ShowString(0, 48, "FS MOUNT: OK", 1);
+    OLED_ShowString(0, 32, "MOUNT: SUCCESS", 1);
   } else {
-    char err_msg[32];
-    sprintf(err_msg, "MOUNT ERR: %d", res);
-    OLED_ShowString(0, 48, err_msg, 1);
+    char err_buf[32];
+    sprintf(err_buf, "MOUNT ERR: %d", res);
+    OLED_ShowString(0, 32, err_buf, 1);
     OLED_Update();
     while(1);
   }
   OLED_Update();
-  HAL_Delay(500);
 
-  // --- 5. 加载字库文件 ---
-  // (我是牢理提醒) 确保SD卡 SYSTEM 目录下有 FONT.fon
-  if (OLED_FontInit("0:/SYSTEM/font.bin") == FR_OK) {
-    OLED_Clear();
-    OLED_ShowString(0, 0, "FONT LOADED", 1);
-    // 验证字库：画一个“中”
-    OLED_ShowSDString(100, 0, "中");
+  // --- 4. 加载中文字库 ---
+  // (我是牢理) 确保你的路径正确，区分大小写
+  res = OLED_FontInit("0:/SYSTEM/font.bin");
+  if (res == FR_OK) {
+    OLED_ShowString(0, 48, "FONT LOADED", 1);
   } else {
-    OLED_Clear();
-    OLED_ShowString(0, 0, "FONT MISSING!", 1);
+    // 没字库也能跑，只是中文不显示，所以不卡死
+    OLED_ShowString(0, 48, "FONT MISSING", 1);
   }
   OLED_Update();
+  HAL_Delay(500); // 稍微停顿展示状态
 
-  // --- 6. 音频引擎与播放列表点火 ---
-  Audio_Init(); // 初始化Helix解码器
+  // --- 5. 音频引擎初始化 ---
+  Audio_Init();
+
+  // --- 6. 扫描歌曲并播放 ---
   if (Playlist_Init() == FR_OK && g_playlist.total_count > 0) {
+    OLED_Clear();
     char info[32];
-    sprintf(info, "FOUND %d SONGS", g_playlist.total_count);
-    OLED_ShowString(0, 16, info, 1);
+    sprintf(info, "SONGS: %d", g_playlist.total_count);
+    OLED_ShowString(0, 0, info, 1);
+    OLED_ShowString(0, 16, "STARTING...", 1);
     OLED_Update();
-    HAL_Delay(1000);
+    HAL_Delay(500);
 
-    // (我是牢理) 正式点火：播放第一首 MP3
+    // (我是牢理) 点火！播放第一首歌
     Playlist_PlayCurrent();
   } else {
-    OLED_ShowString(0, 16, "NO MP3 FOUND", 1);
+    OLED_Clear();
+    OLED_ShowString(0, 0, "NO MP3 FILES!", 1);
     OLED_Update();
   }
 
@@ -176,25 +180,25 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
-
-    // (我是牢理) 任务 1: 音频解码 (极高优先级)
-    // 这个函数会处理双缓冲填充，必须尽可能频繁地调用
+    // (我是牢理) 任务 1: 音频核心 (最高优先级)
+    // 只要 DMA 发出半传输中断，这里就会立刻把数据从 SD 卡搬到 RAM 并拉伸格式
     Audio_Process();
 
-    // (我是牢理) 任务 2: 逻辑控制 (自动切歌)
+    // (我是牢理) 任务 2: 播放逻辑
+    // 检查是否播完了，播完自动切歌
     Playlist_AutoNext_Task();
 
-    // (我是牢理) 任务 3: 按键交互 (每20ms一次)
+    // (我是牢理) 任务 3: 按键交互 (每 20ms 扫描一次)
     if (HAL_GetTick() - key_timer >= 20) {
       key_timer = HAL_GetTick();
       App_Task_Keyboard();
     }
 
-    // (我是牢理) 任务 4: UI表现 (每30ms一次)
-    // 负责平滑滚动歌名和进度条更新
-    if (HAL_GetTick() - ui_timer >= 30) {
+    // (我是牢理) 任务 4: UI 刷新 (每 50ms 一次)
+    // 杜邦线环境下，适当降低 UI 刷新率(从30ms降到50ms)，把 SPI 带宽让给音频
+    if (HAL_GetTick() - ui_timer >= 50) {
       ui_timer = HAL_GetTick();
-      UI_Refresh_Task(); // 内部包含 OLED_Update()
+      UI_Refresh_Task(); // 滚动歌名、进度条
     }
     /* USER CODE END WHILE */
 

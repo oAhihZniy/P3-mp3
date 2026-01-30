@@ -14,7 +14,7 @@ static uint8_t SPI_ReadWriteByte(uint8_t data) {
 // 2. SPI 切换到高速模式 (初始化完成后调用)
 void SD_SPI_SpeedHigh(void) {
     __HAL_SPI_DISABLE(&hspi1);
-    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16; // 100MHz/4 = 25MHz
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8; // 100MHz/4 = 25MHz
     HAL_SPI_Init(&hspi1);
     __HAL_SPI_ENABLE(&hspi1);
 }
@@ -329,7 +329,7 @@ uint8_t SD_ReadDisk(uint8_t* buf, uint32_t sector, uint8_t cnt) {
         }
 
         // 2. 等待起始令牌 0xFE
-        uint32_t timeout = 0x1FFFF;
+        uint32_t timeout = 0xFFFF;
         while (SPI_ReadWriteByte(0xFF) != 0xFE && timeout--);
         if (timeout == 0) {
             SD_CS_HIGH();
@@ -349,7 +349,7 @@ uint8_t SD_ReadDisk(uint8_t* buf, uint32_t sector, uint8_t cnt) {
         }
 
         // 4. 等待完成
-        timeout = 0x1FFFF;
+        timeout = 0xFFFF;
         while (!g_dma_rx_done && timeout--);
         if (timeout == 0) {
             SD_CS_HIGH();
@@ -371,7 +371,7 @@ uint8_t SD_ReadDisk(uint8_t* buf, uint32_t sector, uint8_t cnt) {
 // 1. 等待 SD 卡写完成 (忙检测)
 // SD 卡在写入数据时会将 MISO 拉低，直到内部操作完成
 static uint8_t SD_WaitWriteDone(void) {
-    uint32_t timeout = 0xFFFFF;
+    uint32_t timeout = 0xFFFF;
     while (SPI_ReadWriteByte(0xFF) != 0xFF) {
         if (timeout-- == 0) return 1; // 超时
     }

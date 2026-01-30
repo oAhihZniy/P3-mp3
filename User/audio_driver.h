@@ -2,36 +2,52 @@
 #define __AUDIO_DRIVER_H
 
 #include "main.h"
-#include "ff.h"    // <--- 核心修改：必须包含 FatFs 的头文件以识别 FRESULT
-#include "fatfs.h" // 或者包含 CubeMX 生成的这个
+#include "ff.h"
+#include "mp3dec.h"
 
-// 音频缓冲区配置
-#define AUDIO_BUF_SIZE    16384  // 16KB 总缓冲
+// --- 缓冲区配置 ---
+// 16-bit on 32-bit 模式：1帧 MP3 (2304采样) 拉伸后占用 9216 字节
+// 设定总缓冲 24KB (每半区 12KB)，足够容纳任何一帧并留有余量
+#define AUDIO_BUF_SIZE    24576
 #define MP3_IN_BUF_SIZE   8192
-extern uint16_t AudioBuffer[AUDIO_BUF_SIZE / 2];
-// 播放状态枚举
+
+// --- 播放状态枚举 ---
 typedef enum {
-    AUDIO_IDLE = 0,// 空闲
-    AUDIO_PLAYING,// 播放中
-    AUDIO_STOPPED,// 停止
-    AUDIO_FINISHED,  // 代表当前歌曲自然播放完成
-    AUDIO_ERROR// 错误
+    AUDIO_IDLE = 0,
+    AUDIO_PLAYING,
+    AUDIO_STOPPED,
+    AUDIO_FINISHED, // 播放自然结束
+    AUDIO_ERROR
 } AudioStatus_t;
 
-// 外部调用接口
-void Audio_Init(void);// 初始化音频系统
-FRESULT Audio_Play(const char* filename);// 播放指定文件
-void Audio_Stop(void);// 停止播放
-void Audio_Process(void);// 音频处理主循环，需定期调用
-AudioStatus_t Audio_GetStatus(void);// 获取当前播放状态
+// --- 变量导出 ---
+extern MP3FrameInfo mp3FrameInfo;
+extern uint8_t mp3InBuf[MP3_IN_BUF_SIZE];
+extern uint8_t *readPtr;
+extern int bytesLeft;
+// 导出 AudioBuffer 供 main.c 的正弦波测试用 (如果需要)
+extern uint16_t AudioBuffer[AUDIO_BUF_SIZE / 2];
 
-// static void Apply_Volume(uint16_t* buffer, uint32_t len);
-void Audio_PauseResume(void);// 切换播放/暂停状态
-void Audio_SetVolume(uint8_t vol);// 设置音量 (0-100)
-uint8_t Audio_GetVolume(void);// 获取当前音量
+// --- 函数接口 ---
+// 1. 初始化与底层
+void Audio_Init(void);
+void Audio_Stream_Init(void);
+int Audio_Fill_Stream(FIL* file);
+void Audio_Decoder_Init(void);
+int Audio_Decode_Frame(int16_t *pcm_out);
+void Audio_Skip_ID3(FIL* file);
 
-uint32_t Audio_GetElapsedSec(void);// 获取已播放秒数
-void Audio_ResetTimer(void);// 重置播放计时器
+// 2. 高层控制 (你缺少的)
+FRESULT Audio_Play(const char* filename);
+void Audio_Stop(void);
+void Audio_PauseResume(void);
+void Audio_Process(void); // 主循环任务
 
+// 3. 状态与设置
+AudioStatus_t Audio_GetStatus(void);
+void Audio_SetVolume(uint8_t vol);
+uint8_t Audio_GetVolume(void);
+uint32_t Audio_GetElapsedSec(void);
+void Audio_ResetTimer(void);
 
 #endif
