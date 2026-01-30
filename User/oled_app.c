@@ -144,7 +144,7 @@ void UI_DrawDynamicSpectrum(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
         if (sample < 0) sample = -sample;
 
         // 映射高度 (32768是16位最大振幅)
-        uint8_t bar_h = (sample * h) / 16384 ; // 稍微放大一点灵敏度
+        uint8_t bar_h = (sample *10 * h) / 16384 ; // 稍微放大一点灵敏度
         if (bar_h > h) bar_h = h;
 
         // 画出像 P3 菜单那样的细柱状条
@@ -234,7 +234,10 @@ void UI_Refresh_Task(void) {
         real_time_bytes = 0;
         last_stat_tick = now;
     }
-
+    uint8_t progress_percent = 0;
+    if (g_total_duration > 0) {
+        progress_percent = (elapsed * 100) / g_total_duration;
+    }
     OLED_Clear();
 
     // --- A. 顶部区域 ---
@@ -254,14 +257,17 @@ void UI_Refresh_Task(void) {
 
     // --- C. 底部区域 ---
     // 进度条
-    OLED_DrawProgressBar(0, 44, 128, 4, (elapsed % 300) * 100 / 300);
+    OLED_DrawProgressBar(0, 44, 128, 5, progress_percent);
 
     // 左下角：播放/暂停图标
     UI_DrawStatusIcon(4, 48, Audio_GetStatus());
 
     // 时间显示 (放在图标后面)
-    snprintf(info_str, sizeof(info_str), "%02lu:%02lu / 05:00", elapsed / 60, elapsed % 60);
-    OLED_ShowString(30, 48, info_str, 1);
+    char time_str[32];
+    snprintf(time_str, sizeof(time_str), "%02lu:%02lu/%02lu:%02lu",
+             elapsed / 60, elapsed % 60,
+             g_total_duration / 60, g_total_duration % 60);
+    OLED_ShowString(30, 48, time_str, 1);
 
     OLED_Update();
 }

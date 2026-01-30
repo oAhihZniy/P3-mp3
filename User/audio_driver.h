@@ -10,10 +10,11 @@
 // 让半个缓冲区正好容纳 6 帧，总缓冲区容纳 12 帧
 // 2304 * 12 = 27648
 #define AUDIO_BUFFER_COUNT  27648
-
 // 输入缓冲保持 8KB 不变
 #define MP3_IN_BUF_SIZE     8192
 
+extern uint32_t g_total_duration; // 总时长（秒）
+extern uint32_t g_file_size;      // 文件大小
 // 状态机
 typedef enum {
     AUDIO_IDLE = 0,
@@ -28,6 +29,7 @@ extern MP3FrameInfo g_mp3FrameInfo;
 extern uint16_t AudioBuffer[AUDIO_BUFFER_COUNT];
 
 // 接口
+void Audio_Set_I2S_Freq(uint32_t freq);
 void Audio_Init(void);// 音频系统初始化
 FRESULT Audio_Play(const char* filename);// 播放指定文件
 void Audio_Stop(void);// 停止播放

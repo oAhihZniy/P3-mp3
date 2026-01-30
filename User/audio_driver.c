@@ -18,8 +18,32 @@ static uint8_t currentVolume = 5;
 static uint32_t playedSamples = 0;
 static uint32_t currentSampleRate = 44100;
 
+uint32_t g_total_duration = 0;// 总时长（秒）
+uint32_t g_file_size = 0;// 文件大小
+static uint32_t id3_tag_size = 0; // 记录跳过的标签大小
+
 /* --- 内部函数 --- */
 
+// 动态调整 I2S 硬件采样率
+// 参数 freq: 44100 或 48000
+void Audio_Set_I2S_Freq(uint32_t freq) {
+    if (hi2s2.Init.AudioFreq == freq) return; // 如果频率没变，直接跳过
+
+    // 1. 暂时停止当前的 DMA
+    HAL_I2S_DMAStop(&hi2s2);
+
+    // 2. 修改结构体中的频率参数
+    hi2s2.Init.AudioFreq = freq;
+
+    // 3. 调用 HAL 库函数重新初始化
+    // HAL 会自动根据 PLLI2S 时钟和目标频率计算出最准确的分频系数 (I2SDIV)
+    if (HAL_I2S_Init(&hi2s2) != HAL_OK) {
+        // 如果初始化失败（极少见），可以报个错
+    }
+
+    // (我是牢理) 更新记录当前的采样率
+    currentSampleRate = freq;
+}
 static void Apply_Volume(int16_t* pcm, int samples) {
     if (currentVolume >= 100) return;
     for (int i = 0; i < samples; i++) {
@@ -49,16 +73,17 @@ static int Fill_Stream_Buffer(void) {
 static void Skip_ID3_Tag(void) {
     uint8_t header[10];
     UINT br;
+    id3_tag_size = 0;
     f_lseek(&mp3File, 0);
     f_read(&mp3File, header, 10, &br);
     if (br == 10 && header[0] == 'I' && header[1] == 'D' && header[2] == '3') {
-        uint32_t size = ((header[6] & 0x7F) << 21) | ((header[7] & 0x7F) << 14) |
+        id3_tag_size = ((header[6] & 0x7F) << 21) | ((header[7] & 0x7F) << 14) |
                         ((header[8] & 0x7F) << 7)  | (header[9] & 0x7F);
-        f_lseek(&mp3File, size + 10);
+        id3_tag_size += 10;
+        f_lseek(&mp3File, id3_tag_size);
     } else {
         f_lseek(&mp3File, 0);
     }
-    bytesLeft = 0; readPtr = mp3InBuf;
 }
 
 static int Decode_Frame_To_Buffer(int16_t *target_buf) {
@@ -133,29 +158,34 @@ void Audio_Init(void) {
 }
 
 FRESULT Audio_Play(const char* filename) {
-    Audio_Stop();
+    Audio_Stop(); // 1. 先停掉上一首
+    Audio_ResetTimer(); // 2. 时间清零
+
     FRESULT res = f_open(&mp3File, filename, FA_READ);
-    if (res != FR_OK) { audioStatus = AUDIO_ERROR; return res; }
+    if (res != FR_OK) return res;
 
-    Skip_ID3_Tag();
-    Audio_Stream_Init(); // 重置缓冲区
-    playedSamples = 0;
+    g_file_size = f_size(&mp3File); // 3. 获取文件总字节数
+    Skip_ID3_Tag(); // 4. 跳过 ID3，此时会更新 id3_tag_size
+
+    // 5. 初始化缓冲区指针
+    Audio_Stream_Init();
     memset(AudioBuffer, 0, sizeof(AudioBuffer));
-    fillBufferFlag = 0;
 
-    // 预填满两个半区 (共12帧)
-    uint32_t pos = 0;
-    // 填满整个缓冲区
-    while (pos < AUDIO_BUFFER_COUNT) {
-        if (Decode_Frame_To_Buffer((int16_t*)&AudioBuffer[pos]) == 0) {
-            pos += g_mp3FrameInfo.outputSamps;
-        } else {
-            break;
+    // 6. 预解码第一帧：为了拿到采样率和比特率
+    // 注意：这里需要填入 AudioBuffer 的起始位置
+    if (Decode_Frame_To_Buffer((int16_t*)AudioBuffer) == 0) {
+        // (我是牢理) A. 自适应语速：根据第一帧自动设硬件时钟
+        Audio_Set_I2S_Freq(g_mp3FrameInfo.samprate);
+
+        // (我是牢理) B. 计算时长：公式 = (有效字节数 * 8) / 比特率
+        if (g_mp3FrameInfo.bitrate > 0) {
+            // (文件总大小 - ID3标签大小) = 纯音频数据大小
+            // 时长 = 纯音频数据字节数 / (比特率 / 8)
+            g_total_duration = (g_file_size - id3_tag_size) / (g_mp3FrameInfo.bitrate / 8);
         }
     }
 
-    // 启动 DMA
-    // 长度参数是 uint16_t 的总数
+    // 7. 正式开启 DMA
     HAL_I2S_Transmit_DMA(&hi2s2, AudioBuffer, AUDIO_BUFFER_COUNT);
 
     audioStatus = AUDIO_PLAYING;
