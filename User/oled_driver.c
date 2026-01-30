@@ -148,11 +148,33 @@ void OLED_DrawCJKChar(int16_t x, int16_t y, uint32_t unicode) {
 
 
 // 画线 (简单实现，仅支持水平线占位)
+// void OLED_DrawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color) {
+//
+//     for (uint8_t i = x1; i <= x2; i++) OLED_DrawPoint(i, y1, color); // 简单的水平线占位
+// }
+// 全角度直线算法，用于画 P3 的各种斜向切割线
 void OLED_DrawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color) {
+    int16_t dx = (x1 < x2) ? (x2 - x1) : (x1 - x2);
+    int16_t dy = (y1 < y2) ? (y2 - y1) : (y1 - y2);
+    int16_t sx = (x1 < x2) ? 1 : -1;
+    int16_t sy = (y1 < y2) ? 1 : -1;
+    int16_t err = dx - dy;
 
-    for (uint8_t i = x1; i <= x2; i++) OLED_DrawPoint(i, y1, color); // 简单的水平线占位
+    while (1) {
+        OLED_DrawPoint(x1, y1, color);
+        if (x1 == x2 && y1 == y2) break;
+        int16_t e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; x1 += sx; }
+        if (e2 < dx) { err += dx; y1 += sy; }
+    }
 }
 
+// (我是牢理) 补全垂直线，频谱绘制必备
+void OLED_DrawVLine(uint8_t x, uint8_t y, uint8_t h, uint8_t color) {
+    for (uint8_t i = y; i < y + h; i++) {
+        OLED_DrawPoint(x, i, color);
+    }
+}
 
 // (我是牢理) 强健的 UTF-8 混合显示函数
 // void OLED_ShowSDString(uint8_t x, uint8_t y, const char* str) {

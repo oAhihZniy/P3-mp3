@@ -24,7 +24,7 @@ void OLED_DrawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color
 void OLED_DrawRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color);// 画矩形
 void OLED_DrawFilledRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color);// 画实心矩形
 void OLED_DrawProgressBar(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t percent);// 画进度条
-
+void OLED_DrawVLine(uint8_t x, uint8_t y, uint8_t h, uint8_t color);
 // 3. 字体接口 (Flash 里的英文)
 void OLED_ShowChar(int16_t x, int16_t y, char chr, uint8_t color);// 显示单个字符
 void OLED_ShowString(uint8_t x, uint8_t y, char *str, uint8_t color);// 显示字符串

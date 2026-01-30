@@ -5,6 +5,8 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "i2s.h"
+
 // 内部工具：UTF-8 解码
 static uint8_t Get_Unicode_From_UTF8(const uint8_t* p, uint32_t* out_unicode) {
     if ((p[0] & 0x80) == 0) { *out_unicode = p[0]; return 1; }
@@ -57,49 +59,81 @@ void UI_DrawMixedScrollTitle(uint8_t y, const char* str, uint32_t tick) {
     }
 }
 
+/**
+ * (我是牢理) P3 风格动态波形跳动
+ * x, y: 位置, w, h: 宽度和最大高度
+ */
+void UI_DrawDynamicSpectrum(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
+    // 获取 DMA 实时播放位置 (之前我们算过)
+    uint32_t dma_pos = (AUDIO_BUFFER_COUNT) - __HAL_DMA_GET_COUNTER(hi2s2.hdmatx);
 
-extern uint32_t real_time_bytes;
-extern uint32_t last_stat_tick;
-extern uint32_t current_bw;
+    for (uint8_t i = 0; i < w; i += 4) {
+        // 采样 PCM 数据并取绝对值
+        int16_t sample = (int16_t)AudioBuffer[(dma_pos + i * 16) % AUDIO_BUFFER_COUNT];
+        if (sample < 0) sample = -sample;
 
-void UI_Refresh_Task(void) {
-    char info[32];
-    uint32_t now = HAL_GetTick();
+        // 映射高度 (32768是16位最大振幅)
+        uint8_t bar_h = (sample * h) / 16384; // 稍微放大一点灵敏度
+        if (bar_h > h) bar_h = h;
 
-    // 1. 带宽计算逻辑 (1秒更新一次)
-    if (now - last_stat_tick >= 1000) {
-        current_bw = (float)real_time_bytes / 1024.0f;
-        real_time_bytes = 0;
-        last_stat_tick = now;
+        // 画出像 P3 菜单那样的细柱状条
+        OLED_DrawVLine(x + i, y + (h - bar_h), bar_h, 1);
+        OLED_DrawVLine(x + i + 1, y + (h - bar_h), bar_h, 1);
     }
+}
 
-    OLED_Clear();
+/**
+ * (我是牢理) 画出 P3 标志性的斜向几何装饰
+ */
+void UI_DrawP3Aesthetic(void) {
+    // 顶部右侧的斜切角
+    OLED_DrawLine(100, 0, 127, 10, 1);
+    OLED_DrawLine(105, 0, 127, 8, 1);
 
-    // 2. 状态栏：显示当前歌曲/总数
-    snprintf(info, sizeof(info), "%02d/%02d  %s",
-             g_playlist.current_index + 1, g_playlist.total_count,
-             (Audio_GetStatus() == AUDIO_PLAYING) ? "PLAY" : "PAUSE");
-    OLED_ShowString(0, 0, info, 1);
+    // 左侧的垂直条纹装饰
+    OLED_DrawFilledRect(0, 15, 2, 34, 1);
 
-    // 3. 歌名滚动栏 (UI 中间)
-    UI_DrawMixedScrollTitle(18, g_playlist.current_filename, now);
-
-    // 4. 底部测速与时间 (UI 最下面)
-    uint32_t sec = Audio_GetElapsedSec();
-    // 格式化输出：左边是测速，右边是播放时间
-    snprintf(info, sizeof(info), "%luK/s    %02lu:%02lu",
-             current_bw, sec / 60, sec % 60);
-    OLED_ShowString(5, 50, info, 1);
-
-    // 5. 进度条 (P3 风格)
-    OLED_DrawProgressBar(0, 42, 128, 4, (sec % 300) * 100 / 300);
-
-    OLED_Update();
+    // 进度条上方的斜虚线
+    for(int i=0; i<128; i+=6) {
+        OLED_DrawPoint(i, 40, 1);
+    }
 }
 
 
+void UI_Refresh_Task(void) {
+    char buf[32];
+    uint32_t now = HAL_GetTick();
+    uint32_t sec = Audio_GetElapsedSec();
+    extern uint32_t current_bw; // 引用测速变量
 
+    OLED_Clear();
 
+    // 1. 绘制 P3 几何背景装饰
+    UI_DrawP3Aesthetic();
+
+    // 2. 状态栏 (左上角)
+    // 01/15  V:40
+    snprintf(buf, sizeof(buf), "%02d/%02d  V%02d",
+             g_playlist.current_index + 1, g_playlist.total_count, Audio_GetVolume());
+    OLED_ShowString(4, 0, buf, 1);
+
+    // 3. 核心区域：动态频谱 + 滚动歌名
+    // 左边跳动波形，右边滚歌名
+    UI_DrawDynamicSpectrum(4, 20, 32, 20);
+    OLED_Update();
+    UI_DrawMixedScrollTitle(16, g_playlist.current_filename, now);
+
+    // 4. 底部进度条 (做成 P3 风格：带边框和细线)
+    // 假设歌长 300s
+    uint8_t progress = (sec % 300) * 100 / 300;
+    OLED_DrawProgressBar(0, 44, 128, 4, progress);
+
+    // 5. 最底部显示时间
+    snprintf(buf, sizeof(buf), "TIME: %02lu:%02lu", sec / 60, sec % 60);
+    OLED_ShowString(35, 48, buf, 1);
+
+    OLED_Update();
+}
 
 
 
