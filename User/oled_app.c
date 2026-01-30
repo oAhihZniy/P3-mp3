@@ -99,39 +99,7 @@ void UI_Refresh_Task(void) {
 
 
 
-// 测试界面任务
-// 在 oled_app.c 顶部定义两个模拟变量
-static uint32_t test_seconds = 0;
-static uint32_t test_last_tick = 0;
 
-void UI_Test_Task(void) {
-    char info_str[32];
-    uint32_t current_tick = HAL_GetTick();
-
-    // 1. 【核心修正】模拟时间自增逻辑，不依赖音频驱动
-    if (current_tick - test_last_tick >= 1000) {
-        test_last_tick = current_tick;
-        test_seconds++;
-    }
-
-    OLED_Clear();
-
-    // 2. 顶部状态
-    snprintf(info_str, sizeof(info_str), "01/10  MOCK >");
-    OLED_ShowString(0, 0, info_str, 1);
-
-    // 3. 中部：平滑滚动歌名 (tick 传 current_tick)
-    UI_DrawMixedScrollTitle(20, "Burn My Dread -Persona 3- Testing...", current_tick);
-
-    // 4. 底部：进度条 (根据模拟时间算进度，假设歌曲长100秒)
-    OLED_DrawProgressBar(0, 42, 120, 6, (test_seconds % 100));
-
-    // 5. 底部时间：显示模拟时间
-    snprintf(info_str, sizeof(info_str), "%02lu:%02lu/01:40", test_seconds / 60, test_seconds % 60);
-    OLED_ShowString(30, 50, info_str, 1);
-
-    OLED_Update();
-}
 
 
 
