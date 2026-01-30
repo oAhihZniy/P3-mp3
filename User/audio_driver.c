@@ -21,7 +21,7 @@ static int bytesLeft = 0;
 // --- 控制标志 ---
 static volatile uint8_t fillBufferFlag = 0; // 0:空闲, 1:填前半, 2:填后半
 static AudioStatus_t audioStatus = AUDIO_IDLE;
-static uint8_t currentVolume = 40;
+static uint8_t currentVolume = 6;
 
 // --- 统计数据 ---
 static uint32_t playedSamples = 0;
@@ -61,49 +61,27 @@ static void Apply_Volume(int16_t* pcm, int samples) {
  * 补充 MP3 码流数据
  */
 extern uint32_t real_time_bytes;// 引用 main.c 里的变量 用完记得删
-// static int Fill_Stream_Buffer(void) {
-//     UINT br;
-//     // 1. 数据搬运：把没解完的尾巴搬到头部
-//     if (bytesLeft > 0 && readPtr != mp3InBuf) {
-//         memmove(mp3InBuf, readPtr, bytesLeft);
-//     }
-//     readPtr = mp3InBuf;
-//
-//     // 2. 计算空余空间
-//     int space = MP3_IN_BUF_SIZE - bytesLeft;
-//     if (space < 512) return 0; // 空间太小不读
-//
-//     // 3. 读卡 (杜邦线环境建议不要频繁开关中断，除非极其不稳)
-//     FRESULT res = f_read(&mp3File, mp3InBuf + bytesLeft, space, &br);
-//     if (res != FR_OK) return -1;
-//
-//     real_time_bytes += br; // <--- 关键：没这行，速度永远是 0
-//     bytesLeft += br;
-//     return br;
-// }
 static int Fill_Stream_Buffer(void) {
     UINT br;
-    if (bytesLeft > 2048) return 0; // 还有粮，不急着读
-
-    if (readPtr != mp3InBuf) {
+    // 1. 数据搬运：把没解完的尾巴搬到头部
+    if (bytesLeft > 0 && readPtr != mp3InBuf) {
         memmove(mp3InBuf, readPtr, bytesLeft);
-        readPtr = mp3InBuf;
     }
+    readPtr = mp3InBuf;
 
+    // 2. 计算空余空间
     int space = MP3_IN_BUF_SIZE - bytesLeft;
+    if (space < 512) return 0; // 空间太小不读
 
-    // (我是牢理) 一口气读满 4KB-6KB，减少 f_read 的次数
-    // 杜邦线环境下，我们通过关闭中断保证这一大块数据传输不被打断
-    // __disable_irq();
+    // 3. 读卡 (杜邦线环境建议不要频繁开关中断，除非极其不稳)
     FRESULT res = f_read(&mp3File, mp3InBuf + bytesLeft, space, &br);
-    // __enable_irq();
+    if (res != FR_OK) return -1;
 
-    if (res == FR_OK) {
-        real_time_bytes += br; // 用于测速
-        bytesLeft += br;
-    }
+    real_time_bytes += br; // <--- 关键：没这行，速度永远是 0
+    bytesLeft += br;
     return br;
 }
+
 
 /**
  * 跳过 ID3v2 标签头
@@ -217,34 +195,50 @@ FRESULT Audio_Play(const char* filename) {
 void Audio_Process(void) {
     if (audioStatus != AUDIO_PLAYING || fillBufferFlag == 0) return;
 
-    // 锁定当前要填写的半区
-    uint8_t part = fillBufferFlag;
-    fillBufferFlag = 0; // 清除标志
+    // 1. 尝试给码流缓冲区补货 (使用重构后的函数名)
+    Fill_Stream_Buffer();
 
-    // 计算半区边界 (单位: int16_t)
-    // 16KB总大小 / 2字节 = 8192个点
-    // 半区 = 4096 个点
+    // 2. 锁定要填写的半区并立即清除标志
+    uint8_t part = fillBufferFlag;
+    fillBufferFlag = 0;
+
+    // 3. 计算半区采样点边界 (针对 16KB 缓冲区)
+    // 数组总长 8192 个 uint16 (16384字节)，半区是 4096 个位置
     uint32_t half_samples = AUDIO_BUF_SIZE / 4;
     uint32_t start_idx = (part == 1) ? 0 : half_samples;
     uint32_t end_idx   = start_idx + half_samples;
     uint32_t curr_idx  = start_idx;
 
-    // 贪婪循环：直到填满半区
-    // 2304 是标准帧最大采样数，留出余量防止溢出
-    while (curr_idx < (end_idx - 2304)) {
+    // (我是牢理) 核心补丁：死磕式填充循环
+    // 只要当前填充位置还没摸到半区的边界，就一直解！
+    while (curr_idx < end_idx) {
+        // 计算当前半区剩下的空间
+        uint32_t space_left = end_idx - curr_idx;
+
+        // 如果剩下的空间不够塞下一帧最大的 PCM (1152*2 = 2304)
+        if (space_left < 2304) {
+            // (我是牢理) 重点：把剩下的这丁点空间填成静音(0)
+            // 彻底消除由于旧数据残留导致的“噼啪”声
+            for(uint32_t s = curr_idx; s < end_idx; s++) {
+                AudioBuffer[s] = 0;
+            }
+            break;
+        }
+
+        // 调用重构后的解码接口，直接解到 AudioBuffer 对应位置
         int err = Decode_Frame_To_Buffer((int16_t*)&AudioBuffer[curr_idx]);
 
         if (err == 0) {
-            // 成功，指针后移
+            // 成功，指针累加实际解出的采样数
             curr_idx += g_mp3FrameInfo.outputSamps;
         } else if (err == -1) {
-            // 文件结束
+            // 文件播放结束
             Audio_Stop();
             audioStatus = AUDIO_FINISHED;
             break;
         } else {
-            // 解码错误，本次循环不做指针移动，尝试下一次解码
-            // 或者可以填静音
+            // 如果这一帧解坏了，跳过 1 个采样点（2字节）继续尝试，防止死循环
+            curr_idx += 2;
         }
     }
 }

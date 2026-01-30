@@ -14,7 +14,7 @@ static uint8_t SPI_ReadWriteByte(uint8_t data) {
 // 2. SPI 切换到高速模式 (初始化完成后调用)
 void SD_SPI_SpeedHigh(void) {
     __HAL_SPI_DISABLE(&hspi1);
-    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8; // 100MHz/4 = 25MHz
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16; // 100MHz/4 = 25MHz
     HAL_SPI_Init(&hspi1);
     __HAL_SPI_ENABLE(&hspi1);
 }

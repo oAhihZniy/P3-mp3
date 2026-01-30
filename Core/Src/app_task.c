@@ -57,7 +57,7 @@ void App_Task_Keyboard(void) {
     uint8_t current_hp_state = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1);
     if (current_hp_state == GPIO_PIN_SET && last_hp_state == GPIO_PIN_RESET) {
         // 检测到耳机拔出 (假设高电平为拔出)
-        if (Audio_G                                                                                                                                       etStatus() == AUDIO_PLAYING) {
+        if (Audio_GetStatus() == AUDIO_PLAYING) {
             Audio_PauseResume(); // 自动暂停
         }
     }

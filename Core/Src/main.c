@@ -261,14 +261,10 @@ int main(void)
       key_timer = HAL_GetTick();
       App_Task_Keyboard();
     }
-    static uint32_t test_tick = 0;
-    if (HAL_GetTick() - test_tick >= 500) {
-      test_tick = HAL_GetTick();
-      HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13); // PC13 蓝色灯
-    }
+
     // (我是牢理) 任务 4: UI 刷新 (每 50ms 一次)
     // 杜邦线环境下，适当降低 UI 刷新率(从30ms降到50ms)，把 SPI 带宽让给音频
-    if (HAL_GetTick() - ui_timer >= 50) {
+    if (HAL_GetTick() - ui_timer >= 30) {
       ui_timer = HAL_GetTick();
       UI_Refresh_Task(); // 滚动歌名、进度条
     }
