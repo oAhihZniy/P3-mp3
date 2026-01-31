@@ -9,7 +9,7 @@
 // 1帧 MP3 (16bit立体声) = 1152 * 2 = 2304 个数据点
 // 让半个缓冲区正好容纳 6 帧，总缓冲区容纳 12 帧
 // 2304 * 12 = 27648
-#define AUDIO_BUFFER_COUNT  27648
+#define AUDIO_BUFFER_COUNT  2304*6
 // 输入缓冲保持 8KB 不变
 #define MP3_IN_BUF_SIZE     8192
 

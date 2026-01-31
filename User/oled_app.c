@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 #include "i2s.h"
+#include "oled_font.h"
 
 // 内部工具：UTF-8 解码
 static uint8_t Get_Unicode_From_UTF8(const uint8_t* p, uint32_t* out_unicode) {
@@ -135,7 +136,7 @@ void UI_DrawMixedScroll_Window(uint8_t x, uint8_t y, uint8_t window_w, const cha
  * x, y: 位置, w, h: 宽度和最大高度
  */
 void UI_DrawDynamicSpectrum(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
-    // 获取 DMA 实时播放位置 (之前我们算过)
+    // 获取 DMA 实时播放位置
     uint32_t dma_pos = (AUDIO_BUFFER_COUNT) - __HAL_DMA_GET_COUNTER(hi2s2.hdmatx);
 
     for (uint8_t i = 0; i < w; i += 4) {
@@ -213,10 +214,12 @@ void UI_Refresh_Task1(void) {
 void UI_DrawStatusIcon(uint8_t x, uint8_t y, AudioStatus_t status) {
     if (status == AUDIO_PLAYING) {
         // 画一个 ">" 播放图标
-        OLED_ShowString(x, y, ">", 1);
+        OLED_DrawImage(x,y,16,16,P3_PlayIcon_16x16);
+        // OLED_ShowString(x, y, ">", 1);
     } else {
         // 画一个 "||" 暂停图标
-        OLED_ShowString(x, y, "||", 1);
+        OLED_DrawImage(x,y,16,16,P3_PauseIcon_16x16);
+        // OLED_ShowString(x, y, "||", 1);
     }
 }
 
@@ -225,15 +228,7 @@ void UI_Refresh_Task(void) {
     uint32_t elapsed = Audio_GetElapsedSec();
     uint32_t now = HAL_GetTick();
 
-    // 1. 带宽统计 (保持原样)
-    static uint32_t last_stat_tick = 0;
-    static uint32_t current_bw = 0;
-    if (now - last_stat_tick >= 1000) {
-        extern uint32_t real_time_bytes;
-        current_bw = real_time_bytes / 1024;
-        real_time_bytes = 0;
-        last_stat_tick = now;
-    }
+
     uint8_t progress_percent = 0;
     if (g_total_duration > 0) {
         progress_percent = (elapsed * 100) / g_total_duration;
@@ -241,11 +236,11 @@ void UI_Refresh_Task(void) {
     OLED_Clear();
 
     // --- A. 顶部区域 ---
-    // 歌曲序号 01/15 和 测速
-    snprintf(info_str, sizeof(info_str), "%02d/%02d  V%02d",
+    // 歌曲序号 01/15
+    snprintf(info_str, sizeof(info_str), "%02d/%02d   V%02d",
                 g_playlist.current_index + 1, g_playlist.total_count, Audio_GetVolume());
     OLED_ShowString(4, 0, info_str, 1);
-    // OLED_DrawVLine(0, 15, 128, 1);
+    OLED_DrawProgressBar(100, 2, 20, 12, Audio_GetVolume());
 
     // --- B. 中部区域 (灵魂：频谱 + 滚动) ---
     // 左侧 0-35 像素放动态频谱
@@ -253,21 +248,21 @@ void UI_Refresh_Task(void) {
 
     // 右侧 40-128 像素滚动歌名 (现在可以控制列了！)
     // X=40, Y=24, 宽度=88
-    UI_DrawMixedScroll_Window(40, 24, 88, g_playlist.current_filename, now);
+    UI_DrawMixedScroll_Window(42, 24, 88, g_playlist.current_filename, now);
 
     // --- C. 底部区域 ---
     // 进度条
     OLED_DrawProgressBar(0, 44, 128, 5, progress_percent);
 
     // 左下角：播放/暂停图标
-    UI_DrawStatusIcon(4, 48, Audio_GetStatus());
+    UI_DrawStatusIcon(4, 50, Audio_GetStatus());
 
     // 时间显示 (放在图标后面)
     char time_str[32];
     snprintf(time_str, sizeof(time_str), "%02lu:%02lu/%02lu:%02lu",
              elapsed / 60, elapsed % 60,
              g_total_duration / 60, g_total_duration % 60);
-    OLED_ShowString(30, 48, time_str, 1);
+    OLED_ShowString(30, 50, time_str, 1);
 
     OLED_Update();
 }

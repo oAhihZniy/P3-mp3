@@ -258,3 +258,26 @@ void OLED_ShowSDString(uint8_t x, uint8_t y, const char* str) {
         if (x > 120) break;
     }
 }
+
+
+/**
+ * 显示任意大小的图片
+ * x, y: 图片左上角坐标
+ * w, h: 图片的宽度和高度
+ * data: 图片的点阵数据数组
+ */
+void OLED_DrawImage(uint8_t x, uint8_t y, uint8_t w, uint8_t h, const uint8_t *data) {
+    // 计算图片每行占用的字节数 (向上取整)
+    uint16_t byteWidth = (w + 7) / 8;
+
+    for (uint8_t j = 0; j < h; j++) { // 遍历行
+        for (uint8_t i = 0; i < w; i++) { // 遍历列
+            // (我是牢理) 核心逻辑：
+            // data[j * byteWidth + (i / 8)] 找到当前像素所在的字节
+            // (0x80 >> (i % 8)) 找到该字节内对应的位 (MSB First 高位在前)
+            if (data[j * byteWidth + (i / 8)] & (0x80 >> (i % 8))) {
+                OLED_DrawPoint(x + i, y + j, 1);
+            }
+        }
+    }
+}

@@ -37,7 +37,9 @@
 #include <stdio.h>
 #include <string.h>
 
+
 #include "mp3dec.h"
+#include "oled_font.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -93,8 +95,8 @@ void Test_SD_Read_Speed(void) {
   char msg[32];
 
   OLED_Clear();
-  OLED_ShowString(0, 0, "TESTING SPEED...", 1);
-  OLED_Update();
+  // OLED_ShowString(0, 0, "TESTING SPEED...", 1);
+  // OLED_Update();
 
   // 1. 打开一个现成的 MP3 文件进行测试
   if (f_open(&file, "0:/Bundle up your dreams.mp3", FA_READ) != FR_OK) {
@@ -182,9 +184,11 @@ int main(void)
   /* USER CODE BEGIN 2 */
   OLED_Init();
   OLED_Clear();
-  OLED_ShowString(0, 0, "SYSTEM BOOT...", 1);
+  // OLED_ShowString(0, 0, "SYSTEM BOOT...", 1);
+  // OLED_Update();
+  OLED_DrawImage(27, 12, 73, 40, P3_Logo_85x64);
   OLED_Update();
-
+  HAL_Delay(1000);
   // --- 2. 启动存储物理层 ---
   if (SD_Init() == 0) {
     OLED_ShowString(0, 16, "SD HARDWARE: OK", 1);
@@ -264,7 +268,7 @@ int main(void)
 
     // (我是牢理) 任务 4: UI 刷新 (每 50ms 一次)
     // 杜邦线环境下，适当降低 UI 刷新率(从30ms降到50ms)，把 SPI 带宽让给音频
-    if (HAL_GetTick() - ui_timer >= 30) {
+    if (HAL_GetTick() - ui_timer >= 40) {
       ui_timer = HAL_GetTick();
       UI_Refresh_Task(); // 滚动歌名、进度条
     }
