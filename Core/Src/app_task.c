@@ -3,13 +3,13 @@
 #include "playlist.h"
 #include "oled_driver.h"
 
-// 建议 20ms 调用一次
+
 void App_Task_Keyboard(void) {
     static uint32_t last_tick = 0;
     if (HAL_GetTick() - last_tick < 20) return;
     last_tick = HAL_GetTick();
 
-    // --- 1. 播放/暂停键 (PA0) - 状态机消抖 ---
+    // 播放/暂停键 (PA0) - 状态机消抖
     static uint8_t play_cnt = 0;
     if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET) {
         if (play_cnt < 3) play_cnt++;
@@ -20,7 +20,7 @@ void App_Task_Keyboard(void) {
         play_cnt = 0;
     }
 
-    // --- 2. 音量控制 (PA1, PA2) - 允许长按连续调节 ---
+    // 音量控制 (PA1, PA2)
     // 这里不需要松手检测，按住就会一直慢慢变
     if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_1) == GPIO_PIN_RESET) { // Vol +
         uint8_t v = Audio_GetVolume();
@@ -37,7 +37,7 @@ void App_Task_Keyboard(void) {
         }
     }
 
-    // --- 3. 下一曲 (PB0) - 状态机消抖 ---
+    // 下一曲 (PB0) - 状态机消抖
     static uint8_t next_cnt = 0;
     if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET) {
         if (next_cnt < 3) next_cnt++;
@@ -48,7 +48,7 @@ void App_Task_Keyboard(void) {
         next_cnt = 0;
     }
 
-    // --- 4. 上一曲 (假设在 PB3，根据你之前的规划) ---
+    // 上一曲
     static uint8_t prev_cnt = 0;
     if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_3) == GPIO_PIN_RESET) {
         if (prev_cnt < 3) prev_cnt++;
@@ -59,8 +59,7 @@ void App_Task_Keyboard(void) {
         prev_cnt = 0;
     }
 
-    // --- 5. 耳机插拔实时检测 (PB1) ---
-    // 即使没有中断，每 20ms 检测一次也足够快了
+    // 耳机插拔实时检测 (PB1)
     static uint8_t last_hp_state = 0;
     uint8_t current_hp_state = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1);
     if (current_hp_state == GPIO_PIN_SET && last_hp_state == GPIO_PIN_RESET) {

@@ -3,7 +3,7 @@
 #include <string.h>
 
 /* --- 变量定义 --- */
-uint16_t AudioBuffer[AUDIO_BUFFER_COUNT]; // 27648 * 2 = 54KB RAM (F411 够用)
+uint16_t AudioBuffer[AUDIO_BUFFER_COUNT];
 static uint8_t mp3InBuf[MP3_IN_BUF_SIZE];
 static uint8_t *readPtr = mp3InBuf;
 static int bytesLeft = 0;
@@ -22,7 +22,6 @@ uint32_t g_total_duration = 0;// 总时长（秒）
 uint32_t g_file_size = 0;// 文件大小
 static uint32_t id3_tag_size = 0; // 记录跳过的标签大小
 
-/* --- 内部函数 --- */
 
 // 动态调整 I2S 硬件采样率
 // 参数 freq: 44100 或 48000
@@ -118,7 +117,6 @@ static int Decode_Frame_To_Buffer(int16_t *target_buf) {
     }
 }
 
-/* --- 核心处理逻辑 (完美对齐版) --- */
 
 void Audio_Process(void) {
     if (audioStatus != AUDIO_PLAYING || fillBufferFlag == 0) return;
@@ -126,9 +124,9 @@ void Audio_Process(void) {
     uint8_t part = fillBufferFlag;
     fillBufferFlag = 0;
 
-    // 半区大小 (单位: 采样点个数)
+    // 半区大小
     // 27648 / 2 = 13824
-    // 13824 / 2304 = 6.0 帧 (整除！完美！)
+    // 13824 / 2304 = 6.0 帧
     uint32_t half_len = AUDIO_BUFFER_COUNT / 2;
     uint32_t start_pos = (part == 1) ? 0 : half_len;
     uint32_t end_pos = start_pos + half_len;
@@ -153,7 +151,6 @@ void Audio_Process(void) {
     }
 }
 
-/* --- 外部接口 --- */
 
 void Audio_Init(void) {
     hMP3Decoder = MP3InitDecoder();
@@ -177,10 +174,10 @@ FRESULT Audio_Play(const char* filename) {
     // 6. 预解码第一帧：为了拿到采样率和比特率
     // 注意：这里需要填入 AudioBuffer 的起始位置
     if (Decode_Frame_To_Buffer((int16_t*)AudioBuffer) == 0) {
-        // (我是牢理) A. 自适应语速：根据第一帧自动设硬件时钟
+
         Audio_Set_I2S_Freq(g_mp3FrameInfo.samprate);
 
-        // (我是牢理) B. 计算时长：公式 = (有效字节数 * 8) / 比特率
+        // 计算时长：公式 = (有效字节数 * 8) / 比特率
         if (g_mp3FrameInfo.bitrate > 0) {
             // (文件总大小 - ID3标签大小) = 纯音频数据大小
             // 时长 = 纯音频数据字节数 / (比特率 / 8)
@@ -211,7 +208,7 @@ void Audio_PauseResume(void) {
     }
 }
 /**
- * (我是牢理) 初始化/复位码流缓冲区指针
+ * 初始化/复位码流缓冲区指针
  */
 void Audio_Stream_Init(void) {
     bytesLeft = 0;

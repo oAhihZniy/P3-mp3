@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-// UI 核心任务
+
 void UI_Refresh_Task(void);
 
 // 混合文字滚动逻辑

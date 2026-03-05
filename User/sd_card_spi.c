@@ -30,51 +30,13 @@ uint8_t SD_WaitReady(void) {
     return 1;
 }
 
-// 4. 发送命令 1.0
-// uint8_t SD_SendCmd(uint8_t cmd, uint32_t arg, uint8_t crc) {
-//     uint8_t res;
-//     uint8_t retry = 0;
-//
-//     // 1. 确保释放总线并多给 8 个时钟，让卡完成上一指令
-//     SD_CS_HIGH();
-//     SPI_ReadWriteByte(0xFF);
-//
-//     // 2. 选中卡
-//     SD_CS_LOW();
-//
-//     // 3. 等待卡准备好 (MISO 应该为高)
-//     if (SD_WaitReady()) {
-//         SD_CS_HIGH();
-//         return 0xFF;
-//     }
-//
-//     // 4. 发送命令包
-//     SPI_ReadWriteByte(cmd | 0x40);
-//     SPI_ReadWriteByte(arg >> 24);
-//     SPI_ReadWriteByte(arg >> 16);
-//     SPI_ReadWriteByte(arg >> 8);
-//     SPI_ReadWriteByte(arg);
-//     SPI_ReadWriteByte(crc);
-//
-//     // 5. 特别处理：CMD12 停止指令后需要跳过一个字节
-//     if (cmd == CMD12) SPI_ReadWriteByte(0xFF);
-//
-//     // 6. 等待 R1 响应 (最高位必须为 0)
-//     do {
-//         res = SPI_ReadWriteByte(0xFF);
-//     } while ((res & 0x80) && retry++ < 0XFE);
-//
-//     // 注意：这里先不要释放 CS，让调用者决定何时释放（因为读数据需要持续拉低 CS）
-//     return res;
-// }
-
 
 // 4. 发送命令 1.1 (增加等待深度，提升兼容性)
 uint8_t SD_SendCmd(uint8_t cmd, uint32_t arg, uint8_t crc) {
     uint8_t res;
     uint8_t retry = 0;
 
-    // 1. 关键：先释放 CS 并发送 8 个时钟，强制让卡片退出之前的任何状态
+    // 1. 先释放 CS 并发送 8 个时钟，强制让卡片退出之前的任何状态
     SD_CS_HIGH();
     SPI_ReadWriteByte(0xFF);
 
@@ -99,12 +61,12 @@ uint8_t SD_SendCmd(uint8_t cmd, uint32_t arg, uint8_t crc) {
     if (cmd == CMD12) SPI_ReadWriteByte(0xFF);
 
     // 6. 等待 R1 响应 (最高位必须为 0)
-    // (我是牢理) 增加等待深度，确保慢速卡能响应
+    // 增加等待深度，确保慢速卡能响应
     do {
         res = SPI_ReadWriteByte(0xFF);
     } while ((res & 0x80) && retry++ < 0xFF);
 
-    // 注意：这里我们故意让 CS 保持 LOW，交给 ReadDisk 函数去处理后续数据读取
+
     return res;
 }
 
@@ -118,7 +80,7 @@ uint8_t SD_Init(void) {
     hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
     HAL_SPI_Init(&hspi1);
 
-    // B. 必须在 CS 为高电平时发送至少 74 个时钟脉冲
+    // B. 74 个时钟脉冲
     SD_CS_HIGH();
     for (i = 0; i < 15; i++) SPI_ReadWriteByte(0xFF);
 
@@ -170,149 +132,9 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi) {
     }
 }
 
-// uint8_t SD_ReadDisk(uint8_t* buf, uint32_t sector, uint8_t cnt) {
-//     uint8_t res;
-//     if (cnt == 1) {
-//         res = SD_SendCmd(CMD17, sector, 0x01); // 读单块
-//         if (res == 0) {
-//             // 等待起始令牌 0xFE
-//             while (SPI_ReadWriteByte(0xFF) != 0xFE);
-//
-//             // 使用 DMA 接收 512 字节
-//             g_dma_rx_done = 0;
-//             HAL_SPI_Receive_DMA(&hspi1, buf, 512);
-//             while (!g_dma_rx_done); // 等待 DMA 中断触发
-//
-//             // 接收 2 字节 CRC
-//             SPI_ReadWriteByte(0xFF);
-//             SPI_ReadWriteByte(0xFF);
-//         }
-//     }
-//     SD_CS_HIGH();
-//     return res;
-// }
-// 下面的可用 1.0
-// uint8_t SD_ReadDisk(uint8_t* buf, uint32_t sector, uint8_t cnt) {
-//     uint8_t res = 0;
-//
-//     // 如果是 SDHC 卡，使用扇区地址；如果是老卡，需要 sector << 9
-//     // 假设你用的是现代 SDHC 卡
-//
-//     for (uint8_t i = 0; i < cnt; i++) {
-//         res = SD_SendCmd(CMD17, sector + i, 0xFF); // 修改为标准的 CRC 0xFF
-//         if (res != 0) break;
-//
-//         // 等待起始令牌 0xFE
-//         uint32_t timeout = 0xFFFF;
-//         while (SPI_ReadWriteByte(0xFF) != 0xFE && timeout--);
-//         if (timeout == 0) { res = 0xFF; break; }
-//
-//         // 使用 DMA 接收 512 字节
-//         g_dma_rx_done = 0;
-//         HAL_SPI_Receive_DMA(&hspi1, buf + (i * 512), 512);
-//
-//         // 增加安全超时，防止硬件故障导致死循环
-//         timeout = 0xFFFF;
-//         while (!g_dma_rx_done && timeout--);
-//
-//         // 接收 2 字节 CRC
-//         SPI_ReadWriteByte(0xFF);
-//         SPI_ReadWriteByte(0xFF);
-//     }
-//
-//     SD_CS_HIGH();
-//     SPI_ReadWriteByte(0xFF); // 释放总线
-//     return res;
-// }
 
 
 
-// 下面的 1.4 版本，增加超时保护，确保不会死循环 !!!标记
-// uint8_t SD_ReadDisk(uint8_t* buf, uint32_t sector, uint8_t cnt) {
-//     uint8_t res = 0;
-//     for (uint8_t i = 0; i < cnt; i++) {
-//         // 1. 每读一个新扇区，都必须发送一次命令
-//         res = SD_SendCmd(CMD17, sector + i, 0xFF);
-//         if (res != 0x00) {
-//             SD_CS_HIGH();
-//             return 1;
-//         }
-//
-//         // 2. 等待起始令牌 0xFE，超时给足 (我是牢理建议给到 0xFFFFF)
-//         uint32_t timeout = 0xFFFFF;
-//         while (SPI_ReadWriteByte(0xFF) != 0xFE && timeout--);
-//         if (timeout == 0) {
-//             SD_CS_HIGH();
-//             return 1;
-//         }
-//
-//         // 3. DMA 接收 512 字节
-//         g_dma_rx_done = 0;
-//         // HAL_SPI_Receive_DMA(&hspi1, buf + (i * 512), 512);
-//         HAL_SPI_Receive(&hspi1, buf + (i * 512), 512, 100);
-//         // 4. 等待 DMA 完成，超时同样给足
-//         timeout = 0xFFFFF;
-//         while (!g_dma_rx_done && timeout--);
-//         if (timeout == 0) {
-//             SD_CS_HIGH();
-//             return 1;
-//         }
-//
-//         // 5. 丢弃 2 字节 CRC
-//         SPI_ReadWriteByte(0xFF);
-//         SPI_ReadWriteByte(0xFF);
-//
-//         // 6. (关键！) 每读完一块，必须立刻释放 CS 并给 8 个时钟缓冲
-//         // 这样 SD 卡才能准备好下一次寻址
-//         SD_CS_HIGH();
-//         SPI_ReadWriteByte(0xFF);
-//     }
-//     return 0;
-// }
-
-//下面的 2.0 版本，彻底弃用 DMA，改为阻塞式读取，提升稳定性（这个可以正常读取字库）
-// uint8_t SD_ReadDisk(uint8_t* buf, uint32_t sector, uint8_t cnt) {
-//     uint8_t res = 0;
-//
-//     // (我是牢理) 增加逻辑：如果读取失败，最多重试 3 次
-//     for (uint8_t i = 0; i < cnt; i++) {
-//         uint8_t retry = 3;
-//         while (retry--) {
-//             res = SD_SendCmd(CMD17, sector + i, 0xFF);
-//             if (res == 0x00) {
-//                 // 等待起始令牌 0xFE
-//                 uint32_t timeout = 0xFFFFF;
-//                 while (SPI_ReadWriteByte(0xFF) != 0xFE && timeout--);
-//
-//                 if (timeout > 0) {
-//                     // (我是牢理) 这里先用阻塞模式测试稳定性
-//                     for (uint32_t j = 0; j < 512; j++) {
-//                         buf[i * 512 + j] = SPI_ReadWriteByte(0xFF);
-//                     }
-//                     // 跳过 CRC
-//                     SPI_ReadWriteByte(0xFF);
-//                     SPI_ReadWriteByte(0xFF);
-//
-//                     res = 0; // 读取成功
-//                     break;   // 跳出重试循环
-//                 }
-//             }
-//             // 如果这一轮失败了，释放总线，稍后再试
-//             SD_CS_HIGH();
-//             SPI_ReadWriteByte(0xFF);
-//             HAL_Delay(1);
-//         }
-//
-//         // (我是牢理) 关键：每一块读完都要彻底释放总线
-//         SD_CS_HIGH();
-//         SPI_ReadWriteByte(0xFF);
-//
-//         if (res != 0) return 1; // 彻底失败
-//     }
-//     return 0;
-// }
-
-// 下面的 2.1 版本，重新启用 DMA，但改为 TransmitReceive 模式，提升稳定性
 static const uint8_t DUMMY_FF[512] = {
     [0 ... 511] = 0xFF
 };
@@ -336,11 +158,11 @@ uint8_t SD_ReadDisk(uint8_t* buf, uint32_t sector, uint8_t cnt) {
             return 0xFE;
         }
 
-        // 3. 【核心修正】使用 TransmitReceive_DMA
+        // 3. 使用 DMA 读取数据块
         // 一边发送 DUMMY_FF (产生时钟和保持高电平)，一边接收数据到 buf
         g_dma_rx_done = 0;
 
-        // (我是牢理) 强行重置 SPI 状态防止锁死
+        // 强行重置 SPI 状态防止锁死
         hspi1.State = HAL_SPI_STATE_READY;
 
         if (HAL_SPI_TransmitReceive_DMA(&hspi1, (uint8_t*)DUMMY_FF, buf + (i * 512), 512) != HAL_OK) {

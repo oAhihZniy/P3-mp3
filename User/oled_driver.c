@@ -6,42 +6,28 @@
 uint8_t OLED_Buffer[OLED_BUFFER_SIZE];// OLED 显存缓冲区
 volatile uint8_t oled_ready = 1;
 
-static FIL fontFile;           // 唯一的字库句柄
+static FIL fontFile;
 static uint8_t font_init_done = 0;
 
-// SSD1306 初始化序列
-// static const uint8_t init_cmds[] = {
-//     0xAE, 0x20, 0x00, 0xB0, 0xC8, 0x00, 0x10, 0x40, 0x81, 0x7F,
-//     0xA1, 0xA6, 0xA8, 0x1F, 0xAD, 0x8B, 0xD3, 0x00, 0xD5, 0xF0,
-//     0xD9, 0x22, 0xDA, 0x02, 0xDB, 0x40, 0xAF
-// };
-
-// SSD1306 初始化序列
-// static const uint8_t init_cmds[] = {
-//     0xAE, 0x20, 0x10, 0xB0, 0xC8, 0x00, 0x10, 0x40, 0x81, 0xDF,
-//     0xA1, 0xA6, 0xA8, 0x3F, 0xA4, 0xD3, 0x00, 0xD5, 0xF0,
-//     0xD9, 0x22, 0xDA, 0x12, 0xDB, 0x20, 0x8D, 0x14, 0xAF
-// };
-
 static const uint8_t init_cmds[] = {
-    0xAE,       // 关闭显示
-    0x20, 0x00, // 核心：必须是 0x00 (水平寻址) 才能适配你的全屏 DMA 刷新
-    0xB0,       // 起始页
-    0xC8,       // 翻转 COM
-    0x00, 0x10, // 列地址设置
-    0x40,       // 起始行
-    0x81, 0xDF, // 对比度
-    0xA1,       // 左右反转
-    0xA6,       // 正常显示
-    0xA8, 0x3F, // 核心：64行 (0.96寸专用)
-    0xA4,       // 全屏显示
-    0xD3, 0x00, // 偏移
-    0xD5, 0xF0, // 频率
-    0xD9, 0x22, // 充电周期
-    0xDA, 0x12, // 核心：Alternative COM (0.96寸专用)
-    0xDB, 0x20, // VCOMH
-    0x8D, 0x14, // 开启电荷泵
-    0xAF        // 开启显示
+    0xAE,
+    0x20, 0x00,
+    0xB0,
+    0xC8,
+    0x00, 0x10,
+    0x40,
+    0x81, 0xDF,
+    0xA1,
+    0xA6,
+    0xA8, 0x3F,
+    0xA4,
+    0xD3, 0x00,
+    0xD5, 0xF0,
+    0xD9, 0x22,
+    0xDA, 0x12,
+    0xDB, 0x20,
+    0x8D, 0x14,
+    0xAF
 };
 
 // 发送命令
@@ -147,12 +133,7 @@ void OLED_DrawCJKChar(int16_t x, int16_t y, uint32_t unicode) {
 }
 
 
-// 画线 (简单实现，仅支持水平线占位)
-// void OLED_DrawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color) {
-//
-//     for (uint8_t i = x1; i <= x2; i++) OLED_DrawPoint(i, y1, color); // 简单的水平线占位
-// }
-// 全角度直线算法，用于画 P3 的各种斜向切割线
+
 void OLED_DrawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color) {
     int16_t dx = (x1 < x2) ? (x2 - x1) : (x1 - x2);
     int16_t dy = (y1 < y2) ? (y2 - y1) : (y1 - y2);
@@ -169,56 +150,20 @@ void OLED_DrawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color
     }
 }
 
-// (我是牢理) 补全垂直线，频谱绘制必备
+// 补全垂直线，频谱绘制必备
 void OLED_DrawVLine(uint8_t x, uint8_t y, uint8_t h, uint8_t color) {
     for (uint8_t i = y; i < y + h; i++) {
         OLED_DrawPoint(x, i, color);
     }
 }
 
-// (我是牢理) 强健的 UTF-8 混合显示函数
-// void OLED_ShowSDString(uint8_t x, uint8_t y, const char* str) {
-//     const uint8_t* p = (const uint8_t*)str;
-//     uint32_t unicode = 0;
-//     uint8_t utf_bytes = 0;
-//
-//     while (*p) {
-//         if ((*p & 0x80) == 0) {
-//             // 1字节 ASCII (0xxxxxxx)
-//             OLED_ShowChar(x, y, *p, 1);
-//             x += 8;
-//             p++;
-//         }
-//         else if ((*p & 0xE0) == 0xC0) {
-//             // 2字节 字符 (通常是希腊字母、特殊符号)
-//             unicode = ((*p & 0x1F) << 6) | (*(p + 1) & 0x3F);
-//             OLED_DrawCJKChar(x, y, unicode);
-//             x += 16;
-//             p += 2;
-//         }
-//         else if ((*p & 0xF0) == 0xE0) {
-//             // 3字节 中日韩汉字 (1110xxxx 10xxxxxx 10xxxxxx)
-//             unicode = ((uint32_t)(p[0] & 0x0F) << 12) |
-//                       ((uint32_t)(p[1] & 0x3F) << 6) |
-//                       ((uint32_t)(p[2] & 0x3F));
-//             OLED_DrawCJKChar(x, y, unicode);
-//             x += 16;
-//             p += 3;
-//         }
-//         else {
-//             p++; // 忽略更高字节或其他错误
-//         }
-//
-//         if (x > 120) break; // 屏幕边界保护
-//     }
-// }
 
-// (我是牢理) 关键声明：调用 FatFs 内部的转码函数
+// 调用 FatFs 内部的转码函数
 // dir = 1 代表从 OEM(GBK) 转 Unicode
 extern WCHAR ff_convert (WCHAR src, UINT dir);
 
 /**
- * (我是牢理) 针对 GBK 编码优化的中文显示函数
+ * 针对 GBK 编码优化的中文显示函数
  * 逻辑：识别 GBK 双字节 -> 转为 Unicode -> 查 SD 卡字库
  */
 void OLED_ShowSDString(uint8_t x, uint8_t y, const char* str) {
@@ -227,19 +172,18 @@ void OLED_ShowSDString(uint8_t x, uint8_t y, const char* str) {
 
     while (*p) {
         if (*p < 0x80) {
-            // --- 1. 处理标准 ASCII (英文/数字) ---
+            //  1. 处理标准 ASCII (英文/数字)
             OLED_ShowChar(x, y, (char)*p, 1);
             x += 8;
             p++;
         }
         else {
-            // --- 2. 处理 GBK 中文 (双字节) ---
+            //  2. 处理 GBK 中文
             // 将两个字节拼成一个 16 位的 GBK 码
             // 注意：GBK 是大端序，第一个字节在高位
             uint16_t gbk_val = (*p << 8) | *(p + 1);
 
             // 使用 FatFs 内部表进行转码
-            // 比如：ff_convert(0xD6D0, 1) 会返回 0x4E2D
             unicode_code = ff_convert(gbk_val, 1);
 
             // 如果转码成功（不为 0），则去 SD 卡读字库
@@ -272,7 +216,7 @@ void OLED_DrawImage(uint8_t x, uint8_t y, uint8_t w, uint8_t h, const uint8_t *d
 
     for (uint8_t j = 0; j < h; j++) { // 遍历行
         for (uint8_t i = 0; i < w; i++) { // 遍历列
-            // (我是牢理) 核心逻辑：
+            // 核心逻辑：
             // data[j * byteWidth + (i / 8)] 找到当前像素所在的字节
             // (0x80 >> (i % 8)) 找到该字节内对应的位 (MSB First 高位在前)
             if (data[j * byteWidth + (i / 8)] & (0x80 >> (i % 8))) {

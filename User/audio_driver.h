@@ -8,7 +8,6 @@
 // --- 缓冲区配置  ---
 // 1帧 MP3 (16bit立体声) = 1152 * 2 = 2304 个数据点
 // 让半个缓冲区正好容纳 6 帧，总缓冲区容纳 12 帧
-// 2304 * 12 = 27648
 #define AUDIO_BUFFER_COUNT  2304*6
 // 输入缓冲保持 8KB 不变
 #define MP3_IN_BUF_SIZE     8192
@@ -17,11 +16,11 @@ extern uint32_t g_total_duration; // 总时长（秒）
 extern uint32_t g_file_size;      // 文件大小
 // 状态机
 typedef enum {
-    AUDIO_IDLE = 0,
-    AUDIO_PLAYING,
-    AUDIO_STOPPED,
-    AUDIO_FINISHED,
-    AUDIO_ERROR
+    AUDIO_IDLE = 0,// 空闲
+    AUDIO_PLAYING,// 播放中
+    AUDIO_STOPPED,// 停止/暂停
+    AUDIO_FINISHED,// 播放完成
+    AUDIO_ERROR// 播放错误
 } AudioStatus_t;
 
 extern MP3FrameInfo g_mp3FrameInfo;

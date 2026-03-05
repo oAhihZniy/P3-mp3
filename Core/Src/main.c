@@ -78,72 +78,9 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/* main.c Bundle up your dreams.mp3*/
-#include <stdio.h>
 
-/**
- * (我是牢理) SD卡读取速度专项测试
- * 逻辑：连续读取 1MB 数据，计算耗时
- */
-void Test_SD_Read_Speed(void) {
-  FIL file;
-  UINT br;
-  uint8_t temp_buf[4096]; // 每次读 4KB
-  uint32_t start_tick, end_tick;
-  uint32_t total_read = 0;
-  const uint32_t target_size = 1024 * 1024; // 测试 1MB 数据
-  char msg[32];
 
-  OLED_Clear();
-  // OLED_ShowString(0, 0, "TESTING SPEED...", 1);
-  // OLED_Update();
 
-  // 1. 打开一个现成的 MP3 文件进行测试
-  if (f_open(&file, "0:/Bundle up your dreams.mp3", FA_READ) != FR_OK) {
-    OLED_ShowString(0, 16, "OPEN FAIL!", 1);
-    OLED_Update();
-    return;
-  }
-
-  // 2. 开始计时
-  start_tick = HAL_GetTick();
-
-  while (total_read < target_size) {
-    // 尝试读取数据
-    FRESULT res = f_read(&file, temp_buf, sizeof(temp_buf), &br);
-    if (res != FR_OK || br == 0) break;
-    total_read += br;
-  }
-
-  end_tick = HAL_GetTick();
-  f_close(&file);
-
-  // 3. 计算速度
-  uint32_t duration = end_tick - start_tick; // 耗时(ms)
-  if (duration == 0) duration = 1; // 防止除以0
-
-  // 速度 (KB/s) = (总字节 / 1024) / (时间 / 1000)
-  // 简化为：字节 / ms
-  uint32_t speed = total_read / duration;
-
-  // 4. 显示结果
-  OLED_Clear();
-  OLED_ShowString(0, 0, "READ SPEED TEST", 1);
-
-  sprintf(msg, "Size: %lu KB", total_read / 1024);
-  OLED_ShowString(0, 16, msg, 1);
-
-  sprintf(msg, "Time: %lu ms", duration);
-  OLED_ShowString(0, 32, msg, 1);
-
-  sprintf(msg, "Speed: %lu KB/s", speed);
-  OLED_ShowString(0, 48, msg, 1);
-
-  OLED_Update();
-
-  // 停在这里让我们看清数据
-  while(1);
-}
 /* USER CODE END 0 */
 
 /**
@@ -184,12 +121,11 @@ int main(void)
   /* USER CODE BEGIN 2 */
   OLED_Init();
   OLED_Clear();
-  // OLED_ShowString(0, 0, "SYSTEM BOOT...", 1);
-  // OLED_Update();
+
   OLED_DrawImage(27, 12, 73, 40, P3_Logo_85x64);
   OLED_Update();
   HAL_Delay(1000);
-  // --- 2. 启动存储物理层 ---
+  //  启动存储物理层
   if (SD_Init() == 0) {
     OLED_ShowString(0, 16, "SD HARDWARE: OK", 1);
   } else {
@@ -199,7 +135,7 @@ int main(void)
   }
   OLED_Update();
 
-  // --- 3. 挂载文件系统 (GBK模式，无 L 前缀) ---
+  //  挂载文件系统 (GBK模式，无 L 前缀)
   res = f_mount(&fs, "0:", 1);
   if (res == FR_OK) {
     SD_SPI_SpeedHigh();
@@ -213,8 +149,8 @@ int main(void)
   }
   OLED_Update();
 
-  // --- 4. 加载中文字库 ---
-  // (我是牢理) 确保你的路径正确，区分大小写
+  // 加载中文字库
+  // 确保路径正确，区分大小写
   res = OLED_FontInit("0:/SYSTEM/font.bin");
   if (res == FR_OK) {
     OLED_ShowString(0, 48, "FONT LOADED", 1);
@@ -225,10 +161,10 @@ int main(void)
   OLED_Update();
 
 
-  // --- 5. 音频引擎初始化 ---
+  // 音频引擎初始化
   Audio_Init();
 
-  // --- 6. 扫描歌曲并播放 ---
+  // 扫描歌曲并播放
   if (Playlist_Init() == FR_OK && g_playlist.total_count > 0) {
     OLED_Clear();
     char info[32];
@@ -238,7 +174,7 @@ int main(void)
     OLED_Update();
 
 
-    // (我是牢理) 点火！播放第一首歌
+
     Playlist_PlayCurrent();
   } else {
     OLED_Clear();
@@ -252,22 +188,21 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1) {
-    // (我是牢理) 任务 1: 音频核心 (最高优先级)
+
     // 只要 DMA 发出半传输中断，这里就会立刻把数据从 SD 卡搬到 RAM 并拉伸格式
     Audio_Process();
 
-    // (我是牢理) 任务 2: 播放逻辑
+
     // 检查是否播完了，播完自动切歌
     Playlist_AutoNext_Task();
 
-    // (我是牢理) 任务 3: 按键交互 (每 20ms 扫描一次)
+    // 按键交互 (每 20ms 扫描一次)
     if (HAL_GetTick() - key_timer >= 20) {
       key_timer = HAL_GetTick();
       App_Task_Keyboard();
     }
 
-    // (我是牢理) 任务 4: UI 刷新 (每 50ms 一次)
-    // 杜邦线环境下，适当降低 UI 刷新率(从30ms降到50ms)，把 SPI 带宽让给音频
+    // UI 刷新 (每 50ms 一次)
     if (HAL_GetTick() - ui_timer >= 40) {
       ui_timer = HAL_GetTick();
       UI_Refresh_Task(); // 滚动歌名、进度条
