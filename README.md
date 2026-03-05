@@ -1,4 +1,4 @@
-# P3softmp3 - STM32 MP3 Player
+# STM32 MP3 Player
 
 一个基于 STM32F411 的 MP3 播放器项目，支持从 SD 卡读取并播放 MP3 文件，配备 OLED 显示屏和按键控制。
 
