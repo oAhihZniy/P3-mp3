@@ -114,10 +114,6 @@ SD Card Root
 
 本项目采用 MIT 许可证。包含的第三方库遵循各自的许可证。
 
-## 作者
-
-P3soft Development Team
-
 ## 更新日志
 
 ### Version 1.0
